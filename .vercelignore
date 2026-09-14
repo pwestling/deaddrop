@@ -1,0 +1,9 @@
+.env*
+.agents/
+.playwright-cli/
+output/
+tests/
+scripts/
+AGENTS.md
+CLAUDE.md
+skills-lock.json

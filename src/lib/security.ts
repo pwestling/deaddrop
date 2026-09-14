@@ -1,0 +1,157 @@
+import { randomUUID } from "node:crypto";
+import type { JWTPayload } from "jose";
+import { getAuth } from "./auth";
+import { db } from "./db";
+import { appUrl, ownerEmail, SCOPES } from "./config";
+import { AppError } from "./errors";
+
+import { hash, type Principal } from "./policy";
+export {
+  hash,
+  mintToken,
+  requireScope,
+  requireSpace,
+  type Principal,
+} from "./policy";
+
+export function checkOrigin(request: Request) {
+  if (
+    !["GET", "HEAD", "OPTIONS"].includes(request.method) &&
+    request.headers.get("origin") !== appUrl()
+  ) {
+    throw new AppError(
+      403,
+      "invalid_origin",
+      "This action must originate from Deaddrop.",
+    );
+  }
+}
+
+export async function sessionPrincipal(
+  requestHeaders: Headers,
+): Promise<Principal | null> {
+  const session = await getAuth().api.getSession({ headers: requestHeaders });
+  if (
+    !session ||
+    !ownerEmail() ||
+    session.user.email.toLowerCase() !== ownerEmail()
+  )
+    return null;
+  return {
+    id: `owner:${session.user.id}`,
+    name: session.user.name,
+    owner: true,
+    scopes: [...SCOPES],
+    spaces: null,
+  };
+}
+
+export async function apiPrincipal(request: Request): Promise<Principal> {
+  const authorization = request.headers.get("authorization");
+  if (authorization) {
+    const match = /^Bearer (dd_[A-Za-z0-9_-]{43})$/.exec(authorization);
+    if (!match)
+      throw new AppError(
+        401,
+        "invalid_token",
+        "Use Authorization: Bearer <Deaddrop token>.",
+      );
+    const result = await db.query<{
+      id: string;
+      name: string;
+      scopes: string[];
+      spaces: string[] | null;
+    }>(
+      `UPDATE dd_connections SET last_used_at = now() WHERE token_hash=$1 AND revoked_at IS NULL
+       AND (expires_at IS NULL OR expires_at > now()) RETURNING id,name,scopes,spaces`,
+      [hash(match[1])],
+    );
+    const connection = result.rows[0];
+    if (!connection)
+      throw new AppError(
+        401,
+        "invalid_token",
+        "This token is invalid, expired, or revoked.",
+      );
+    return { ...connection, owner: false };
+  }
+  const principal = await sessionPrincipal(request.headers);
+  if (!principal)
+    throw new AppError(401, "unauthorized", "Sign in or provide an API token.");
+  checkOrigin(request);
+  return principal;
+}
+
+export async function oauthPrincipal(claims: JWTPayload): Promise<Principal> {
+  const clientId =
+    typeof claims.client_id === "string"
+      ? claims.client_id
+      : typeof claims.azp === "string"
+        ? claims.azp
+        : null;
+  if (!claims.sub || !clientId)
+    throw new AppError(
+      401,
+      "invalid_identity",
+      "OAuth token is missing its owner or client identity.",
+    );
+  const user = await db.query<{ email: string }>(
+    'SELECT email FROM "user" WHERE id=$1',
+    [claims.sub],
+  );
+  if (!ownerEmail() || user.rows[0]?.email.toLowerCase() !== ownerEmail())
+    throw new AppError(
+      403,
+      "not_owner",
+      "Only the owner can connect applications.",
+    );
+  const client = await db.query<{ name: string | null }>(
+    'SELECT name FROM "oauthClient" WHERE "clientId"=$1',
+    [clientId],
+  );
+  const scopes =
+    typeof claims.scope === "string"
+      ? claims.scope
+          .split(" ")
+          .filter((v) => SCOPES.includes(v as (typeof SCOPES)[number]))
+      : [];
+  const connection = await db.query<{
+    id: string;
+    name: string;
+    spaces: string[] | null;
+    revoked_at: Date | null;
+  }>(
+    `INSERT INTO dd_connections (id,name,kind,oauth_client_id,scopes) VALUES ($1,$2,'oauth',$3,$4)
+     ON CONFLICT (oauth_client_id) DO UPDATE SET last_used_at=now() RETURNING id,name,spaces,revoked_at`,
+    [
+      randomUUID(),
+      client.rows[0]?.name || "MCP application",
+      clientId,
+      [...SCOPES],
+    ],
+  );
+  if (connection.rows[0].revoked_at)
+    throw new AppError(
+      403,
+      "connection_revoked",
+      "This connection was revoked by the owner.",
+    );
+  return { ...connection.rows[0], scopes, owner: false };
+}
+
+export async function rateLimit(principal: Principal) {
+  const minute = Math.floor(Date.now() / 60000);
+  const result = await db.query<{ count: number }>(
+    `INSERT INTO dd_rate_limits(key,count,expires_at) VALUES ($1,1,now()+interval '2 minutes')
+     ON CONFLICT(key) DO UPDATE SET count=dd_rate_limits.count+1 RETURNING count`,
+    [`${principal.id}:${minute}`],
+  );
+  if (result.rows[0].count > 120)
+    throw new AppError(
+      429,
+      "rate_limited",
+      "Too many requests. Try again in a minute.",
+    );
+  if (Math.random() < 0.01)
+    await db.query("DELETE FROM dd_rate_limits WHERE expires_at < now()");
+}
