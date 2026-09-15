@@ -17,6 +17,10 @@ import {
   createSpace,
 } from "@/lib/admin";
 import { fileInput } from "@/lib/validation";
+import { MemberStore } from "@/lib/members";
+import { db } from "@/lib/db";
+
+const members = new MemberStore(db);
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -100,6 +104,24 @@ async function handle(
       method === "DELETE"
     )
       result = await revokeConnection(principal, path[1]);
+    else if (route === "members" && method === "GET")
+      result = await members.list(principal);
+    else if (route === "members" && method === "POST") {
+      result = await members.create(principal, await jsonBody(request));
+      status = 201;
+    } else if (path[0] === "members" && path.length === 2 && method === "PATCH")
+      result = await members.update(
+        principal,
+        path[1],
+        await jsonBody(request),
+      );
+    else if (
+      path[0] === "members" &&
+      path.length === 3 &&
+      path[2] === "invite" &&
+      method === "POST"
+    )
+      result = await members.reinvite(principal, path[1]);
     else if (route === "overview" && method === "GET")
       result = await overview(principal);
     else if (route === "spaces" && method === "GET") {

@@ -2,10 +2,11 @@ import { randomUUID } from "node:crypto";
 import type { JWTPayload } from "jose";
 import { getAuth } from "./auth";
 import { db } from "./db";
-import { appUrl, ownerEmail, SCOPES } from "./config";
+import { appUrl, SCOPES } from "./config";
 import { AppError } from "./errors";
 import { oauthConnectionClaim } from "./identities";
 import { z } from "zod";
+import { userPrincipal, connectionSpaces } from "./access";
 
 import { hash, type Principal } from "./policy";
 export {
@@ -33,19 +34,7 @@ export async function sessionPrincipal(
   requestHeaders: Headers,
 ): Promise<Principal | null> {
   const session = await getAuth().api.getSession({ headers: requestHeaders });
-  if (
-    !session ||
-    !ownerEmail() ||
-    session.user.email.toLowerCase() !== ownerEmail()
-  )
-    return null;
-  return {
-    id: `owner:${session.user.id}`,
-    name: session.user.name,
-    owner: true,
-    scopes: [...SCOPES],
-    spaces: null,
-  };
+  return session ? userPrincipal(db, session.user.id) : null;
 }
 
 export async function apiPrincipal(request: Request): Promise<Principal> {
@@ -63,9 +52,10 @@ export async function apiPrincipal(request: Request): Promise<Principal> {
       name: string;
       scopes: string[];
       spaces: string[] | null;
+      created_by_user_id: string | null;
     }>(
       `UPDATE dd_connections SET last_used_at = now() WHERE token_hash=$1 AND revoked_at IS NULL
-       AND (expires_at IS NULL OR expires_at > now()) RETURNING id,name,scopes,spaces`,
+       AND (expires_at IS NULL OR expires_at > now()) RETURNING id,name,scopes,spaces,created_by_user_id`,
       [hash(match[1])],
     );
     const connection = result.rows[0];
@@ -75,7 +65,12 @@ export async function apiPrincipal(request: Request): Promise<Principal> {
         "invalid_token",
         "This token is invalid, expired, or revoked.",
       );
-    return { ...connection, owner: false };
+    const { created_by_user_id, ...identity } = connection;
+    return {
+      ...identity,
+      spaces: await connectionSpaces(db, identity.spaces, created_by_user_id),
+      owner: false,
+    };
   }
   const principal = await sessionPrincipal(request.headers);
   if (!principal)
@@ -97,15 +92,12 @@ export async function oauthPrincipal(claims: JWTPayload): Promise<Principal> {
       "invalid_identity",
       "OAuth token is missing its owner or client identity.",
     );
-  const user = await db.query<{ email: string }>(
-    'SELECT email FROM "user" WHERE id=$1',
-    [claims.sub],
-  );
-  if (!ownerEmail() || user.rows[0]?.email.toLowerCase() !== ownerEmail())
+  const account = await userPrincipal(db, claims.sub);
+  if (!account)
     throw new AppError(
       403,
-      "not_owner",
-      "Only the owner can connect applications.",
+      "access_revoked",
+      "This account no longer has access.",
     );
   const connectionClaim = oauthConnectionClaim(claims);
   if (connectionClaim !== undefined) {
@@ -138,10 +130,18 @@ export async function oauthPrincipal(claims: JWTPayload): Promise<Principal> {
       typeof claims.scope === "string" ? claims.scope.split(" ") : [];
     return {
       ...identity,
+      spaces: await connectionSpaces(db, identity.spaces, claims.sub),
       owner: false,
       scopes: identity.scopes.filter((scope) => granted.includes(scope)),
     };
   }
+  // Only the original owner had connections before per-authorization identities existed.
+  if (!account.owner)
+    throw new AppError(
+      403,
+      "invalid_identity",
+      "Reconnect this application to authorize a named identity.",
+    );
   const client = await db.query<{ name: string | null }>(
     'SELECT name FROM "oauthClient" WHERE "clientId"=$1',
     [clientId],

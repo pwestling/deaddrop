@@ -11,11 +11,20 @@ export default function Consent() {
   const [scopes, setScopes] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [access, setAccess] = useState<string[] | null>(null);
   useEffect(() => {
     const query = new URLSearchParams(window.location.search);
     const id = query.get("client_id") || "";
     setClientId(id);
     setScopes((query.get("scope") || "").split(" "));
+    void fetch("/api/v1/spaces")
+      .then(async (response) => {
+        if (!response.ok)
+          throw new Error("Sign in with an account that has workspace access.");
+        const result = await response.json();
+        setAccess(result.spaces.map((space: { name: string }) => space.name));
+      })
+      .catch((error) => setError(error.message));
     authClient.oauth2
       .publicClient({ query: { client_id: id } })
       .then((result) => {
@@ -64,7 +73,10 @@ export default function Consent() {
           <br />
           your Deaddrop?
         </h1>
-        <p>You’re giving this application access to your shared workspace.</p>
+        <p>
+          This application will have access only to your allowed spaces
+          {access ? `: ${access.join(", ")}.` : "."}
+        </p>
         <form
           id="connection-approval"
           className="form-stack"
@@ -117,9 +129,7 @@ export default function Consent() {
           <span>APPLICATION ID</span>
           <code>{clientId}</code>
         </div>
-        <p className="small">
-          You can revoke this connection from your admin UI.
-        </p>
+        <p className="small">You can revoke this connection in Connections.</p>
         {error && (
           <div className="error" role="alert">
             {error}

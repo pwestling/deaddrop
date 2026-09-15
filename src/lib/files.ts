@@ -10,6 +10,7 @@ import { store, type Attachment } from "./store";
 async function reserve(principal: Principal, raw: unknown) {
   requireScope(principal, "deaddrop:write");
   const input = fileInput.parse(raw);
+  input.space ??= principal.spaces?.[0] || "general";
   requireSpace(principal, input.space);
   const spaces = await db.query("SELECT slug FROM dd_spaces WHERE slug=$1", [
     input.space,

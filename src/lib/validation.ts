@@ -12,7 +12,7 @@ export const dropInput = z
   .object({
     title: z.string().trim().min(1).max(200),
     body: z.string().max(200000).default(""),
-    space: spaceSlug.default("general"),
+    space: spaceSlug.optional(),
     recipient: z.string().trim().min(1).max(100).nullable().optional(),
     tags: z.array(z.string().trim().min(1).max(32)).max(10).default([]),
     attachment_ids: z.array(z.uuid()).max(20).default([]),
@@ -36,7 +36,7 @@ export const fileInput = z
       .regex(/^[a-zA-Z0-9!#$&^_.+-]+\/[a-zA-Z0-9!#$&^_.+-]+$/)
       .max(150),
     size: z.number().int().min(1).max(MAX_FILE_BYTES),
-    space: spaceSlug.default("general"),
+    space: spaceSlug.optional(),
   })
   .strict();
 

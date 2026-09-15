@@ -2073,3 +2073,23 @@ small {
     animation: none;
   }
 }
+/* Invited members share this workspace with explicit space access. */
+.member-list {
+  display: grid;
+  gap: 16px;
+  margin: 20px 0;
+}
+.member-card {
+  display: grid;
+  gap: 8px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--border, #e2e8df);
+}
+.member-card .pill {
+  justify-self: start;
+}
+.member-settings h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}

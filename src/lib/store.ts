@@ -159,6 +159,7 @@ export class DropStore {
   async create(principal: Principal, raw: unknown, idempotencyKey?: string) {
     requireScope(principal, "deaddrop:write");
     const input = dropInput.parse(raw);
+    input.space ??= principal.spaces?.[0] || "general";
     requireSpace(principal, input.space);
     if (new Set(input.attachment_ids).size !== input.attachment_ids.length)
       throw new AppError(
@@ -272,11 +273,11 @@ export class DropStore {
   }
 
   async update(principal: Principal, id: string, raw: unknown) {
-    if (!principal.owner)
+    if (!principal.owner && !principal.userId)
       throw new AppError(
         403,
         "owner_required",
-        "Only the owner can organize drops.",
+        "Sign in to organize drops in your spaces.",
       );
     const change = z
       .object({

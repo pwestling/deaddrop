@@ -42,6 +42,7 @@ export class IdentityStore {
     clientId: string;
     approvalKey: string;
     scopes: string[];
+    spaces?: string[] | null;
   }) {
     const name = identityName.parse(input.name);
     return this.database.transaction(async (tx) => {
@@ -81,8 +82,8 @@ export class IdentityStore {
       await reserveIdentityName(tx, name);
       const id = randomUUID();
       await tx.query(
-        `INSERT INTO dd_connections(id,name,kind,scopes,oauth_authorization_client_id,oauth_user_id,oauth_approval_key)
-         VALUES($1,$2,'oauth',$3,$4,$5,$6)`,
+        `INSERT INTO dd_connections(id,name,kind,scopes,oauth_authorization_client_id,oauth_user_id,oauth_approval_key,spaces,created_by_user_id)
+         VALUES($1,$2,'oauth',$3,$4,$5,$6,$7,$5)`,
         [
           id,
           name,
@@ -90,6 +91,7 @@ export class IdentityStore {
           input.clientId,
           input.userId,
           input.approvalKey,
+          input.spaces ?? null,
         ],
       );
       return id;

@@ -15,6 +15,15 @@ ALTER TABLE dd_connections ADD COLUMN IF NOT EXISTS oauth_authorization_client_i
 ALTER TABLE dd_connections ADD COLUMN IF NOT EXISTS oauth_user_id text;
 ALTER TABLE dd_connections ADD COLUMN IF NOT EXISTS oauth_approval_key text;
 CREATE UNIQUE INDEX IF NOT EXISTS dd_connections_approval_key ON dd_connections(oauth_approval_key);
+ALTER TABLE dd_connections ADD COLUMN IF NOT EXISTS created_by_user_id text;
+CREATE INDEX IF NOT EXISTS dd_connections_creator ON dd_connections(created_by_user_id);
+
+CREATE TABLE IF NOT EXISTS dd_members (
+  id uuid PRIMARY KEY, email text UNIQUE NOT NULL, name text NOT NULL,
+  user_id text UNIQUE, spaces text[] NOT NULL CHECK(cardinality(spaces)>0),
+  invite_hash text UNIQUE, invite_expires_at timestamptz,
+  disabled_at timestamptz, created_at timestamptz NOT NULL DEFAULT now()
+);
 
 CREATE TABLE IF NOT EXISTS dd_drops (
   id uuid PRIMARY KEY, space text NOT NULL REFERENCES dd_spaces(slug),

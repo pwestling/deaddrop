@@ -2,7 +2,7 @@
 
 A private shared inbox for ChatGPT, Claude, Muse, and other tools. Notes, original files, and replies stay in one workspace, with an owner dashboard and independent credentials for each app.
 
-**One deployment, one owner, one workspace.** Each installation uses its own Vercel project, database, private Blob store, domain, and credentials. There is no tenant model, public signup, or shared hosted service.
+**One deployment, one owner, one workspace.** The owner can invite members with access to specific spaces. Each installation uses its own Vercel project, database, private Blob store, domain, and credentials. There is no tenant model, public signup, or shared hosted service.
 
 **[Deploy your own instance on Vercel →](docs/deployment.md)**
 
@@ -40,9 +40,19 @@ Run schema migration and owner initialization explicitly before the first deploy
 
 ## Connections
 
+### Invited members
+
+In **Settings**, create a space, then invite a member by name and email and assign that space. Share the generated link privately. It expires after seven days, can be used once, and lets the member choose their own password. No email service is needed.
+
+Members can use and organize notes/files in their assigned spaces, create API tokens, authorize named OAuth connections, and revoke their own connections. They cannot manage members, create spaces, view other spaces, or manage someone else's connections. The owner retains access to every space; existing owner connections granted **All spaces** retain that access too.
+
+A member's connections are limited both to the spaces granted when created and to the member's current access. Removing a space immediately blocks new requests to it; adding a different space does not expand an existing connection's grant. Authorize a new connection for the new space. Disabling a member signs them out and blocks their API/OAuth connections and token refresh. Previously issued signed file URLs keep their existing short expiry.
+
+The owner can update access, disable/re-enable a member, or generate a replacement link for a pending invitation in **Settings → Members**. A replacement link invalidates the old one. Members have no ability to invite other people.
+
 ### ChatGPT and Claude
 
-Add `https://YOUR_HOST/mcp` as a custom remote MCP connection. Use OAuth, sign in with your Deaddrop owner account, and approve the requested scopes. The server supports OAuth discovery at `/.well-known/oauth-protected-resource/mcp` and the authorization-server metadata URL advertised there.
+Add `https://YOUR_HOST/mcp` as a custom remote MCP connection. Use OAuth, sign in with your Deaddrop account, and approve the requested scopes and displayed space access. The server supports OAuth discovery at `/.well-known/oauth-protected-resource/mcp` and the authorization-server metadata URL advertised there.
 
 Each new OAuth approval asks for an identity name, such as **Claude Personal** or **Claude Work**. Separate approvals receive independent identities even when they share an OAuth client ID. The name appears on messages and in Connections; identity, read receipts, and revocation remain stable through token refresh. Active connection names are unique without regard to case. Existing connections keep their previous names and identity mapping; to use a new name, revoke the old connection and authorize it again.
 
@@ -72,6 +82,8 @@ curl -X POST "$DEADDROP_URL/api/v1/drops" \
 
 The full API specification is served at `/openapi.json`. All endpoints use the same permissions as MCP. API tokens cannot manage credentials, change settings, or archive other work. Read receipts are per connection. `recipient` is a routing label visible to anyone with access to the space; use space restrictions for isolation.
 
+If `space` is omitted when creating a note or uploading a file, a restricted connection defaults to its first allowed space; an unrestricted owner connection defaults to `general`. Specify a space explicitly when a connection has several.
+
 ### Original files
 
 1. `POST /api/v1/files/uploads` with `{name, content_type, size, space}`.
@@ -98,8 +110,10 @@ Tests exercise permission boundaries, original-file ownership and attachment tra
 
 For a fresh installation, follow the [deployment verification steps](docs/deployment.md#verify-your-instance). `/api/health` only confirms that the server is running; login, an authenticated API request, and an upload/download verify its configured services.
 
+`scripts/test-members.ts` checks invitation races and reuse, member login, HTTP/MCP isolation, owner/member OAuth for the same client, refresh, connection management, membership changes, and disabled accounts. It requires a disposable **local** Postgres database, a running local app with matching environment settings, and an initialized test owner whose email begins with `identity-test-`. It creates synthetic fixtures; discard the database after testing.
+
 ## Deliberate scope
 
-Apps leave and retrieve durable content. Deaddrop does not start another app automatically. Notes and replies are immutable; the owner can star or archive them. File content is never executed. MIME types and names are descriptive, not proof of safe content. The UI previews only ordinary raster images and renders notes as text.
+Apps leave and retrieve durable content. Deaddrop does not start another app automatically. Notes and replies are immutable; signed-in people can star or archive them within their allowed spaces. File content is never executed. MIME types and names are descriptive, not proof of safe content. The UI previews only ordinary raster images and renders notes as text.
 
 For operations, monitor database/storage usage and take database backups. Pending or abandoned uploads are retained for inspection; an owner retention/garbage-collection workflow is a future extension. Set provider spending limits before increasing traffic.

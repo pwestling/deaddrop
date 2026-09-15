@@ -36,6 +36,7 @@ import {
 import { Brand } from "./brand";
 import { api, bytes, relative } from "./api";
 import { authClient } from "@/lib/auth-client";
+import { MemberSettings } from "./member-settings";
 import type { Drop, Attachment } from "@/lib/store";
 
 type Section =
@@ -83,9 +84,11 @@ const sectionTitle: Record<Section, string> = {
 
 export function Console({
   ownerName,
+  owner,
   baseUrl,
 }: {
   ownerName: string;
+  owner: boolean;
   baseUrl: string;
 }) {
   const [section, setSection] = useState<Section>("inbox");
@@ -268,7 +271,7 @@ export function Console({
             <span className="user-avatar">{ownerName.slice(0, 1)}</span>
             <span>
               <strong>{ownerName}</strong>
-              <small>Workspace owner</small>
+              <small>{owner ? "Workspace owner" : "Space member"}</small>
             </span>
             <MoreHorizontal size={18} />
           </button>
@@ -550,7 +553,8 @@ export function Console({
                 )}
                 <div className="panel-footer">
                   <span>
-                    <LockDot /> Only accessible to you and your connected apps
+                    <LockDot /> Access is limited to each space’s members and
+                    connected apps
                   </span>
                   <span>MADE FOR THE HANDOFF</span>
                 </div>
@@ -572,6 +576,7 @@ export function Console({
           {section === "connections" && (
             <Connections
               baseUrl={baseUrl}
+              defaultSpace={spaces[0]?.slug || "general"}
               connections={overview?.connections || []}
               onCreate={() => setTokenModal(true)}
               onRevoke={async (id) => {
@@ -611,6 +616,7 @@ export function Console({
           )}
           {section === "settings" && (
             <SettingsPanel
+              owner={owner}
               spaces={spaces}
               onRefresh={refresh}
               onNotice={setNotice}
@@ -620,7 +626,12 @@ export function Console({
       </main>
       {composer && (
         <Composer
-          initialSpace={space || "general"}
+          initialSpace={
+            space ||
+            spaces.find((item) => item.slug === "general")?.slug ||
+            spaces[0]?.slug ||
+            "general"
+          }
           spaces={spaces}
           connections={activeConnections}
           onClose={() => setComposer(false)}
@@ -641,6 +652,7 @@ export function Console({
       )}
       {tokenModal && (
         <TokenModal
+          owner={owner}
           spaces={spaces}
           onClose={() => setTokenModal(false)}
           onCreated={refresh}
@@ -706,11 +718,13 @@ function CopyValue({ value }: { value: string }) {
 
 function Connections({
   baseUrl,
+  defaultSpace,
   connections,
   onCreate,
   onRevoke,
 }: {
   baseUrl: string;
+  defaultSpace: string;
   connections: Connection[];
   onCreate: () => void;
   onRevoke: (id: string) => Promise<void>;
@@ -775,7 +789,13 @@ function Connections({
                   {connection.scopes.includes("deaddrop:write")
                     ? "Read / write"
                     : "Read only"}{" "}
-                  · {connection.spaces?.join(", ") || "All spaces"} ·{" "}
+                  ·{" "}
+                  {connection.spaces === null
+                    ? "All spaces"
+                    : connection.spaces.length
+                      ? connection.spaces.join(", ")
+                      : "No current space access"}{" "}
+                  ·{" "}
                   {connection.last_used_at
                     ? `Last used ${relative(connection.last_used_at)}`
                     : "Not used yet"}
@@ -840,7 +860,7 @@ function Connections({
         </summary>
         <p>Send a note using your token:</p>
         <CopyValue
-          value={`curl -X POST '${baseUrl}/api/v1/drops' -H 'Authorization: Bearer YOUR_TOKEN' -H 'Content-Type: application/json' -d '{"title":"A note from Muse","body":"Pick this up in Claude.","space":"general"}'`}
+          value={`curl -X POST '${baseUrl}/api/v1/drops' -H 'Authorization: Bearer YOUR_TOKEN' -H 'Content-Type: application/json' -d '{"title":"A note from Muse","body":"Pick this up in Claude.","space":"${defaultSpace}"}'`}
         />
         <p>
           List drops with <code>GET /api/v1/drops</code>. Read one with{" "}
@@ -1350,10 +1370,12 @@ function DropDetail({
 }
 
 function TokenModal({
+  owner,
   spaces,
   onClose,
   onCreated,
 }: {
+  owner: boolean;
   spaces: Space[];
   onClose: () => void;
   onCreated: () => void;
@@ -1428,7 +1450,9 @@ function TokenModal({
             <label>
               Space
               <select name="space">
-                <option value="">All spaces</option>
+                <option value="">
+                  {owner ? "All spaces" : "All my spaces"}
+                </option>
                 {spaces.map((s) => (
                   <option key={s.slug} value={s.slug}>
                     {s.name}
@@ -1465,10 +1489,12 @@ function TokenModal({
 }
 
 function SettingsPanel({
+  owner,
   spaces,
   onRefresh,
   onNotice,
 }: {
+  owner: boolean;
   spaces: Space[];
   onRefresh: () => void;
   onNotice: (message: string) => void;
@@ -1526,7 +1552,9 @@ function SettingsPanel({
       <section className="surface settings-card">
         <h2>Spaces</h2>
         <p>
-          Keep related context together. Access can be limited per connection.
+          {owner
+            ? "Keep related context together. Assign member and connection access by space."
+            : "These are the spaces you can use. Your connections can only access these spaces."}
         </p>
         <div className="space-list">
           {spaces.map((s) => (
@@ -1537,32 +1565,35 @@ function SettingsPanel({
             </div>
           ))}
         </div>
-        <form className="form-stack" onSubmit={addSpace}>
-          <div className="form-columns">
-            <label>
-              Name
-              <input
-                name="name"
-                placeholder="Research"
-                required
-                maxLength={80}
-              />
-            </label>
-            <label>
-              Identifier
-              <input
-                name="slug"
-                placeholder="research"
-                pattern="[a-z0-9][a-z0-9-]{0,47}"
-                required
-              />
-            </label>
-          </div>
-          <button className="button">
-            <Plus size={15} /> Create space
-          </button>
-        </form>
+        {owner && (
+          <form className="form-stack" onSubmit={addSpace}>
+            <div className="form-columns">
+              <label>
+                Name
+                <input
+                  name="name"
+                  placeholder="Research"
+                  required
+                  maxLength={80}
+                />
+              </label>
+              <label>
+                Identifier
+                <input
+                  name="slug"
+                  placeholder="research"
+                  pattern="[a-z0-9][a-z0-9-]{0,47}"
+                  required
+                />
+              </label>
+            </div>
+            <button className="button">
+              <Plus size={15} /> Create space
+            </button>
+          </form>
+        )}
       </section>
+      {owner && <MemberSettings spaces={spaces} onNotice={onNotice} />}
       <section className="surface settings-card">
         <h2>Your password</h2>
         <p>

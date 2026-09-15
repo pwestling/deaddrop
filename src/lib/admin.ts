@@ -6,6 +6,7 @@ import { mintToken, requireScope, type Principal } from "./security";
 import { connectionInput, spaceSlug } from "./validation";
 import { store } from "./store";
 import { reserveIdentityName } from "./identities";
+import { requireAccount, requireSpace } from "./policy";
 
 export function requireOwner(principal: Principal) {
   if (!principal.owner)
@@ -16,19 +17,25 @@ export function requireOwner(principal: Principal) {
     );
 }
 export async function overview(principal: Principal) {
-  requireOwner(principal);
+  const userId = requireAccount(principal);
   const [counts, connections, activity] = await Promise.all([
     db.query(
       `SELECT count(*) FILTER (WHERE archived_at IS NULL AND parent_id IS NULL)::integer AS total,
       count(*) FILTER (WHERE pinned AND archived_at IS NULL)::integer AS pinned,
-      (SELECT count(*)::integer FROM dd_files WHERE status='ready') AS files,
-      (SELECT COALESCE(sum(size),0)::text FROM dd_files WHERE status='ready') AS storage_bytes,
+      (SELECT count(*)::integer FROM dd_files WHERE status='ready' AND ($2::text[] IS NULL OR space=ANY($2))) AS files,
+      (SELECT COALESCE(sum(size),0)::text FROM dd_files WHERE status='ready' AND ($2::text[] IS NULL OR space=ANY($2))) AS storage_bytes,
       count(*) FILTER (WHERE parent_id IS NULL AND archived_at IS NULL AND principal_id<>$1 AND NOT EXISTS (SELECT 1 FROM dd_receipts r WHERE r.drop_id=dd_drops.id AND r.principal_id=$1))::integer AS unread
-      FROM dd_drops`,
-      [principal.id],
+      FROM dd_drops WHERE $2::text[] IS NULL OR space=ANY($2)`,
+      [principal.id, principal.spaces],
     ),
     listConnections(principal),
-    db.query("SELECT * FROM dd_activity ORDER BY id DESC LIMIT 20"),
+    db.query(
+      `SELECT a.* FROM dd_activity a WHERE $1::boolean
+      OR EXISTS(SELECT 1 FROM dd_drops d WHERE d.id::text=a.target_id AND d.space=ANY($2::text[]))
+      OR EXISTS(SELECT 1 FROM dd_connections c WHERE c.id::text=a.target_id AND c.created_by_user_id=$3)
+      ORDER BY a.id DESC LIMIT 20`,
+      [principal.owner, principal.spaces, userId],
+    ),
   ]);
   return {
     ...counts.rows[0],
@@ -38,16 +45,29 @@ export async function overview(principal: Principal) {
 }
 
 export async function listConnections(principal: Principal) {
-  requireOwner(principal);
+  const userId = requireAccount(principal);
   const result = await db.query(
-    `SELECT id,name,kind,token_prefix,scopes,spaces,created_at,last_used_at,expires_at,revoked_at FROM dd_connections ORDER BY created_at DESC`,
+    `SELECT id,name,kind,token_prefix,scopes,spaces,created_at,last_used_at,expires_at,revoked_at FROM dd_connections
+     WHERE $1::boolean OR created_by_user_id=$2 ORDER BY created_at DESC`,
+    [principal.owner, userId],
   );
-  return { connections: result.rows };
+  return {
+    connections: result.rows.map((row) => ({
+      ...row,
+      spaces: principal.owner
+        ? row.spaces
+        : (row.spaces as string[] | null)?.filter((space) =>
+            principal.spaces!.includes(space),
+          ) || [],
+    })),
+  };
 }
 
 export async function createConnection(principal: Principal, raw: unknown) {
-  requireOwner(principal);
+  const userId = requireAccount(principal);
   const input = connectionInput.parse(raw);
+  input.spaces ??= principal.spaces;
+  for (const space of input.spaces || []) requireSpace(principal, space);
   if (input.spaces) {
     const spaces = await db.query(
       "SELECT slug FROM dd_spaces WHERE slug=ANY($1::text[])",
@@ -62,8 +82,8 @@ export async function createConnection(principal: Principal, raw: unknown) {
   await db.transaction(async (tx) => {
     await reserveIdentityName(tx, input.name);
     await tx.query(
-      `INSERT INTO dd_connections(id,name,kind,token_hash,token_prefix,scopes,spaces,expires_at)
-    VALUES($1,$2,'token',$3,$4,$5,$6,$7)`,
+      `INSERT INTO dd_connections(id,name,kind,token_hash,token_prefix,scopes,spaces,expires_at,created_by_user_id)
+    VALUES($1,$2,'token',$3,$4,$5,$6,$7,$8)`,
       [
         id,
         input.name,
@@ -72,6 +92,7 @@ export async function createConnection(principal: Principal, raw: unknown) {
         input.scopes,
         input.spaces,
         expiresAt,
+        userId,
       ],
     );
   });
@@ -80,10 +101,10 @@ export async function createConnection(principal: Principal, raw: unknown) {
 }
 
 export async function revokeConnection(principal: Principal, id: string) {
-  requireOwner(principal);
+  const userId = requireAccount(principal);
   const result = await db.query<{ name: string }>(
-    "UPDATE dd_connections SET revoked_at=now() WHERE id=$1 RETURNING name",
-    [z.uuid().parse(id)],
+    "UPDATE dd_connections SET revoked_at=now() WHERE id=$1 AND ($2::boolean OR created_by_user_id=$3) RETURNING name",
+    [z.uuid().parse(id), principal.owner, userId],
   );
   if (!result.rows[0])
     throw new AppError(404, "not_found", "Connection not found.");

@@ -1,6 +1,6 @@
 # Deploy your own Deaddrop
 
-This guide installs one private workspace for one owner. Use a separate Vercel project, Postgres database, private Blob store, auth secret, and domain for each independent installation. Spaces and named app connections belong to that owner; they are not tenants or additional user accounts.
+This guide installs one private workspace with one administrator and optional invited members. Use a separate Vercel project, Postgres database, private Blob store, auth secret, and domain for each independent installation. Invited members receive access to assigned spaces within the same workspace; there is no tenant model.
 
 You need Node.js 24, npm, Git, a Vercel account, a Neon account (or another reachable Postgres server), and access to the DNS for your domain. Deaddrop supplies its own email/password authentication: no email service, external login provider, or AI API key is required.
 
@@ -127,7 +127,13 @@ SMOKE_URL="$DEADDROP_URL" node --env-file=.env.bootstrap --import tsx scripts/sm
 
 It creates test credentials, notes, a space, and real Blob objects, then removes its test data in cleanup. The database and Blob token must belong to the target URL. Run it only against an instance you administer; provider requests/storage may incur usage.
 
-To connect an OAuth-capable MCP client, use `https://deaddrop.example.com/mcp`, choose **OAuth**, sign in as the owner, and assign a unique identity name on approval. Clients register themselves; you do not need to pre-create a client ID or secret. Multiple accounts of the same app can have different names. Muse and other HTTP-only clients use named bearer tokens from **Connections**. See the [connection guide](../README.md#connections).
+To connect an OAuth-capable MCP client, use `https://deaddrop.example.com/mcp`, choose **OAuth**, sign in with your account, and assign a unique identity name on approval. Clients register themselves; you do not need to pre-create a client ID or secret. Multiple accounts of the same app can have different names. Invited members' connections inherit their allowed spaces. Muse and other HTTP-only clients use named bearer tokens from **Connections**. See the [connection guide](../README.md#connections).
+
+## Invite someone to a space
+
+After the owner signs in, create a space in **Settings → Spaces**. Under **Members**, enter the person's name and email, select the space, and create an invitation. Copy the link and share it privately. The recipient chooses a password; the link is single-use and expires after seven days. There is no automatic email delivery or public registration.
+
+The invited member can manage their own connections, but only within the space access you assign. You retain administrator access to all spaces. See [member permissions and revocation](../README.md#invited-members) for how existing connections behave when membership changes. `OWNER_EMAIL` remains the administrator allowlist; keep it set to the original owner's email, not the invited member's.
 
 ## Development, upgrades, and backups
 
@@ -159,4 +165,4 @@ Monitor database and Blob usage and retain backups of both. Abandoned uploads ar
 | Uploads fail                                                | Check that the store is private, its token belongs to this project/environment, and the redeployed app has the token.                           |
 | Identity name is already in use                             | Choose a distinct name, or revoke the old connection before reauthorizing with that name. Names are unique ignoring case.                       |
 
-Each independent owner deploys a separate instance. Adding users to one database or mapping multiple unrelated owners to one deployment is outside the application's design.
+Each independent owner deploys a separate instance. Additional people within that workspace use explicit invitations and space permissions; they do not receive a separate tenant or owner role. Create them through **Settings → Members**, not by manually inserting authentication rows.

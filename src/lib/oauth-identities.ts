@@ -3,11 +3,12 @@ import { createHash } from "node:crypto";
 import { APIError } from "better-auth/api";
 import { getOAuthProviderState } from "@better-auth/oauth-provider";
 import { z } from "zod";
-import { appUrl, ownerEmail, SCOPES } from "./config";
+import { appUrl, SCOPES } from "./config";
 import { db } from "./db";
 import { AppError, errorResponse, jsonBody } from "./errors";
 import { CONNECTION_CLAIM, IdentityStore } from "./identities";
 import { identityName } from "./validation";
+import { userPrincipal, connectionSpaces } from "./access";
 
 // Request-local state avoids mixing simultaneous approvals in the same browser session.
 const approval = new AsyncLocalStorage<{
@@ -59,9 +60,10 @@ export const oauthIdentityOptions = {
       user: { id: string; email: string };
       scopes: string[];
     }) => {
-      if (!ownerEmail() || user.email.toLowerCase() !== ownerEmail())
+      const account = await userPrincipal(db, user.id);
+      if (!account)
         throw new APIError("FORBIDDEN", {
-          message: "Only the owner can connect applications.",
+          message: "Your account does not have access to connect applications.",
         });
       const current = approval.getStore();
       // Better Auth has already verified the signed OAuth query before invoking this hook.
@@ -81,6 +83,7 @@ export const oauthIdentityOptions = {
         scopes: scopes.filter((scope) =>
           SCOPES.includes(scope as (typeof SCOPES)[number]),
         ),
+        spaces: account.spaces,
       });
       try {
         return await current.identity;
@@ -102,20 +105,34 @@ export const oauthIdentityOptions = {
     referenceId?: string;
   }) => {
     // Tokens issued before named identities retain their existing connection mapping.
-    if (!referenceId) return {};
+    if (!referenceId) {
+      if (!user || !(await userPrincipal(db, user.id))?.owner)
+        throw new APIError("FORBIDDEN", {
+          message: "Reconnect this application to authorize a named identity.",
+        });
+      return {};
+    }
     const id = z.uuid().safeParse(referenceId);
     if (!id.success || !user)
       throw new APIError("FORBIDDEN", {
         message: "Invalid connection identity.",
       });
-    const result = await db.query(
-      "SELECT id FROM dd_connections WHERE id=$1 AND oauth_user_id=$2 AND kind='oauth' AND revoked_at IS NULL",
+    const result = await db.query<{ id: string; spaces: string[] | null }>(
+      "SELECT id,spaces FROM dd_connections WHERE id=$1 AND oauth_user_id=$2 AND kind='oauth' AND revoked_at IS NULL",
       [id.data, user.id],
     );
     if (!result.rows.length)
       throw new APIError("FORBIDDEN", {
         message: "This connection was revoked or no longer exists.",
       });
+    try {
+      await connectionSpaces(db, result.rows[0].spaces, user.id);
+    } catch {
+      throw new APIError("FORBIDDEN", {
+        message:
+          "This account no longer has access to the connection's spaces.",
+      });
+    }
     return { [CONNECTION_CLAIM]: id.data };
   },
 };

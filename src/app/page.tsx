@@ -8,5 +8,11 @@ export const dynamic = "force-dynamic";
 export default async function Home() {
   const principal = await sessionPrincipal(await headers());
   if (!principal) redirect("/login");
-  return <Console ownerName={principal.name} baseUrl={appUrl()} />;
+  return (
+    <Console
+      ownerName={principal.name}
+      owner={principal.owner}
+      baseUrl={appUrl()}
+    />
+  );
 }

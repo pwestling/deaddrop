@@ -7,6 +7,8 @@ export interface Principal {
   owner: boolean;
   scopes: string[];
   spaces: string[] | null;
+  // Present only on authenticated human sessions, never on app credentials.
+  userId?: string;
 }
 export const hash = (value: string) =>
   createHash("sha256").update(value).digest("hex");
@@ -25,4 +27,14 @@ export function requireScope(principal: Principal, scope: string) {
 export function requireSpace(principal: Principal, space: string) {
   if (principal.spaces && !principal.spaces.includes(space))
     throw new AppError(404, "not_found", "Space or drop not found.");
+}
+
+export function requireAccount(principal: Principal) {
+  if (!principal.userId)
+    throw new AppError(
+      403,
+      "account_required",
+      "Sign in to manage your connections.",
+    );
+  return principal.userId;
 }
