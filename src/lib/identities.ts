@@ -2,8 +2,19 @@ import { randomUUID } from "node:crypto";
 import type { Database, Queryable } from "./db";
 import { AppError } from "./errors";
 import { identityName } from "./validation";
+import { appUrl } from "./config";
 
-export const CONNECTION_CLAIM = "https://deaddrop.thehivemind5.com/connection";
+// The namespace follows this instance's OAuth origin; it is not a network endpoint.
+export const CONNECTION_CLAIM = `${appUrl()}/connection`;
+// Read tokens from installations that used the original fixed namespace before upgrading.
+export const LEGACY_CONNECTION_CLAIM =
+  "https://deaddrop.thehivemind5.com/connection";
+
+export function oauthConnectionClaim(claims: Record<string, unknown>) {
+  return claims[CONNECTION_CLAIM] !== undefined
+    ? claims[CONNECTION_CLAIM]
+    : claims[LEGACY_CONNECTION_CLAIM];
+}
 
 export async function reserveIdentityName(tx: Queryable, name: string) {
   await tx.query(

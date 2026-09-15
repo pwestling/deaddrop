@@ -2,9 +2,11 @@
 
 A private shared inbox for ChatGPT, Claude, Muse, and other tools. Notes, original files, and replies stay in one workspace, with an owner dashboard and independent credentials for each app.
 
-Deployed app: [deaddrop.thehivemind5.com](https://deaddrop.thehivemind5.com). MCP: `https://deaddrop.thehivemind5.com/mcp`. HTTP specification: [openapi.json](https://deaddrop.thehivemind5.com/openapi.json).
+**One deployment, one owner, one workspace.** Each installation uses its own Vercel project, database, private Blob store, domain, and credentials. There is no tenant model, public signup, or shared hosted service.
 
-Cloudflare DNS routes the `deaddrop` CNAME to `f28614a5d317040b.vercel-dns-016.com` with proxying disabled. Vercel serves the app and manages HTTPS. Production `APP_URL` is `https://deaddrop.thehivemind5.com`, which is also the OAuth origin. The previous `deaddrop-gilt.vercel.app` address redirects to this domain.
+**[Deploy your own instance on Vercel →](docs/deployment.md)**
+
+The guide covers a fresh account, custom domain and DNS, storage, environment variables, owner creation, verification, upgrades, and troubleshooting. No source-code edits are needed for a different owner or domain.
 
 ## Stack
 
@@ -16,16 +18,21 @@ Cloudflare DNS routes the `deaddrop` CNAME to `f28614a5d317040b.vercel-dns-016.c
 
 ## Development
 
-Use Node 24 LTS. Copy `.env.example` to `.env.local`, configure the variables, then:
+Use Node 24 LTS. Copy `.env.example` to `.env.local` and configure a development database and private Blob store. Use a direct database URL during the initial migration, then a pooled URL when running against Neon:
 
 ```sh
 npm ci
 npm run db:migrate
 npm run owner:create
+```
+
+`OWNER_EMAIL` identifies the only authorized admin. `OWNER_NAME` optionally sets the initial display name (default: `Owner`). Remove `OWNER_PASSWORD` after the one-time `owner:create` step, switch `DATABASE_URL` to the pooled URL if using Neon, then start the server:
+
+```sh
 npm run dev
 ```
 
-`OWNER_EMAIL` identifies the only authorized admin. `OWNER_PASSWORD` is only used by the one-time `owner:create` script; remove it after initialization. Signups are disabled in the running server. Keep `BETTER_AUTH_SECRET` stable and secret. Use the authenticated Settings screen to change your password.
+Signups are disabled in the running server. Keep `BETTER_AUTH_SECRET` stable and secret. Use the authenticated Settings screen to change your password.
 
 Production needs `APP_URL` set to its stable HTTPS origin, `BETTER_AUTH_SECRET`, `OWNER_EMAIL`, `DATABASE_URL`, and `BLOB_READ_WRITE_TOKEN`. The deployment must be reachable by external clients; Vercel deployment protection must not intercept the production API, MCP, or OAuth routes. App-level authentication remains required.
 
@@ -89,7 +96,7 @@ Tests exercise permission boundaries, original-file ownership and attachment tra
 
 `scripts/test-oauth-identities.ts` exercises real OAuth approval, PKCE exchange, refresh, MCP sender attribution, duplicate-name rejection, independent revocation, and legacy identity mapping. Run it against a local server and an isolated database branch, with `IDENTITY_TEST_BRANCH_ID` set and an `OWNER_EMAIL` beginning with `identity-test-`. It creates test data in that disposable branch. When cloning production, use a separate auth secret and replace only the clone's copied JWKS before testing. Run `scripts/migrate.ts` with the branch's direct database URL before starting the server. The identity schema changes are additive and preserve existing data.
 
-HTTP, MCP, private uploads/downloads, concurrent idempotency, space restrictions, and revocation were checked on the Vercel deployment at `deaddrop.thehivemind5.com`. HTTPS and OAuth discovery were also verified on this domain. Email/password login, browser uploads, desktop/mobile layouts, OAuth consent, PKCE exchange, refresh, code-replay rejection, and OAuth connection revocation were checked against the local production build with a temporary account.
+For a fresh installation, follow the [deployment verification steps](docs/deployment.md#verify-your-instance). `/api/health` only confirms that the server is running; login, an authenticated API request, and an upload/download verify its configured services.
 
 ## Deliberate scope
 

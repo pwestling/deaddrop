@@ -4,7 +4,7 @@ import { getAuth } from "./auth";
 import { db } from "./db";
 import { appUrl, ownerEmail, SCOPES } from "./config";
 import { AppError } from "./errors";
-import { CONNECTION_CLAIM } from "./identities";
+import { oauthConnectionClaim } from "./identities";
 import { z } from "zod";
 
 import { hash, type Principal } from "./policy";
@@ -107,8 +107,9 @@ export async function oauthPrincipal(claims: JWTPayload): Promise<Principal> {
       "not_owner",
       "Only the owner can connect applications.",
     );
-  if (claims[CONNECTION_CLAIM] !== undefined) {
-    const identityId = z.uuid().safeParse(claims[CONNECTION_CLAIM]);
+  const connectionClaim = oauthConnectionClaim(claims);
+  if (connectionClaim !== undefined) {
+    const identityId = z.uuid().safeParse(connectionClaim);
     if (!identityId.success)
       throw new AppError(
         401,

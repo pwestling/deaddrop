@@ -15,7 +15,11 @@ async function main() {
       "An owner already exists. Use the authenticated password-change flow.",
     );
   await createAuth(true).api.signUpEmail({
-    body: { email, password, name: "Porter" },
+    body: {
+      email,
+      password,
+      name: process.env.OWNER_NAME?.trim() || "Owner",
+    },
   });
   console.log(
     "Owner account created. Remove OWNER_PASSWORD from the environment.",
