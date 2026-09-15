@@ -6,6 +6,7 @@ import { Brand } from "@/components/brand";
 
 export default function Consent() {
   const [name, setName] = useState("Application");
+  const [identityName, setIdentityName] = useState("");
   const [clientId, setClientId] = useState("");
   const [scopes, setScopes] = useState<string[]>([]);
   const [error, setError] = useState("");
@@ -29,9 +30,21 @@ export default function Consent() {
     setBusy(true);
     setError("");
     try {
-      const result = await authClient.oauth2.consent({ accept });
-      if (result.error) throw new Error(result.error.message);
-      if (result.data?.url) window.location.assign(result.data.url);
+      const response = await fetch("/api/auth/oauth2/consent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          accept,
+          identity_name: identityName.trim(),
+          oauth_query: window.location.search.slice(1),
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok)
+        throw new Error(
+          result.message || result.error?.message || "Connection failed.",
+        );
+      if (result.url) window.location.assign(result.url);
       else window.location.assign("/");
     } catch (error) {
       setError(error instanceof Error ? error.message : "Connection failed.");
@@ -52,6 +65,32 @@ export default function Consent() {
           your Deaddrop?
         </h1>
         <p>You’re giving this application access to your shared workspace.</p>
+        <form
+          id="connection-approval"
+          className="form-stack"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void decide(true);
+          }}
+        >
+          <label>
+            Identity name
+            <input
+              value={identityName}
+              onChange={(event) => setIdentityName(event.target.value)}
+              placeholder="e.g. Claude Personal or Claude Work"
+              autoComplete="off"
+              maxLength={80}
+              required
+              disabled={busy}
+              aria-describedby="identity-help"
+            />
+          </label>
+          <p id="identity-help" className="small">
+            Give this account a distinct name. Its messages and acknowledgments
+            will use this identity.
+          </p>
+        </form>
         <div className="permission-list">
           {scopes.includes("deaddrop:read") && (
             <div>
@@ -96,8 +135,9 @@ export default function Consent() {
           </button>
           <button
             className="button primary"
-            disabled={busy || !clientId}
-            onClick={() => decide(true)}
+            type="submit"
+            form="connection-approval"
+            disabled={busy || !clientId || !identityName.trim()}
           >
             Allow connection <ArrowRight size={16} />
           </button>

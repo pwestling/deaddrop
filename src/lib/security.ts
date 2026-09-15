@@ -4,6 +4,8 @@ import { getAuth } from "./auth";
 import { db } from "./db";
 import { appUrl, ownerEmail, SCOPES } from "./config";
 import { AppError } from "./errors";
+import { CONNECTION_CLAIM } from "./identities";
+import { z } from "zod";
 
 import { hash, type Principal } from "./policy";
 export {
@@ -105,6 +107,40 @@ export async function oauthPrincipal(claims: JWTPayload): Promise<Principal> {
       "not_owner",
       "Only the owner can connect applications.",
     );
+  if (claims[CONNECTION_CLAIM] !== undefined) {
+    const identityId = z.uuid().safeParse(claims[CONNECTION_CLAIM]);
+    if (!identityId.success)
+      throw new AppError(
+        401,
+        "invalid_identity",
+        "Invalid connection identity.",
+      );
+    const named = await db.query<{
+      id: string;
+      name: string;
+      spaces: string[] | null;
+      scopes: string[];
+    }>(
+      `UPDATE dd_connections SET last_used_at=now() WHERE id=$1 AND oauth_user_id=$2
+       AND oauth_authorization_client_id=$3 AND kind='oauth' AND revoked_at IS NULL
+       RETURNING id,name,spaces,scopes`,
+      [identityId.data, claims.sub, clientId],
+    );
+    const identity = named.rows[0];
+    if (!identity)
+      throw new AppError(
+        403,
+        "connection_revoked",
+        "This connection was revoked or no longer exists.",
+      );
+    const granted =
+      typeof claims.scope === "string" ? claims.scope.split(" ") : [];
+    return {
+      ...identity,
+      owner: false,
+      scopes: identity.scopes.filter((scope) => granted.includes(scope)),
+    };
+  }
   const client = await db.query<{ name: string | null }>(
     'SELECT name FROM "oauthClient" WHERE "clientId"=$1',
     [clientId],

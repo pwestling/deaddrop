@@ -5,6 +5,7 @@ import { cimd } from "@better-auth/cimd";
 import { fetchClientMetadataResource } from "@better-auth/cimd/node";
 import { pool } from "./db";
 import { appUrl, SCOPES } from "./config";
+import { oauthIdentityOptions } from "./oauth-identities";
 
 export function createAuth(bootstrap = false) {
   const base = appUrl();
@@ -24,6 +25,7 @@ export function createAuth(bootstrap = false) {
     plugins: [
       jwt(),
       mcp({
+        ...oauthIdentityOptions,
         loginPage: "/login",
         consentPage: "/consent",
         resource: `${base}/mcp`,

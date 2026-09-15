@@ -10,6 +10,12 @@ CREATE TABLE IF NOT EXISTS dd_connections (
   last_used_at timestamptz, expires_at timestamptz, revoked_at timestamptz
 );
 
+-- Keep oauth_client_id for legacy grants; named authorizations have independent IDs.
+ALTER TABLE dd_connections ADD COLUMN IF NOT EXISTS oauth_authorization_client_id text;
+ALTER TABLE dd_connections ADD COLUMN IF NOT EXISTS oauth_user_id text;
+ALTER TABLE dd_connections ADD COLUMN IF NOT EXISTS oauth_approval_key text;
+CREATE UNIQUE INDEX IF NOT EXISTS dd_connections_approval_key ON dd_connections(oauth_approval_key);
+
 CREATE TABLE IF NOT EXISTS dd_drops (
   id uuid PRIMARY KEY, space text NOT NULL REFERENCES dd_spaces(slug),
   title text NOT NULL, body text NOT NULL DEFAULT '', sender text NOT NULL,

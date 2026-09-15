@@ -5,6 +5,7 @@ import { AppError } from "./errors";
 import { mintToken, requireScope, type Principal } from "./security";
 import { connectionInput, spaceSlug } from "./validation";
 import { store } from "./store";
+import { reserveIdentityName } from "./identities";
 
 export function requireOwner(principal: Principal) {
   if (!principal.owner)
@@ -58,11 +59,22 @@ export async function createConnection(principal: Principal, raw: unknown) {
   const { token, tokenHash, prefix } = mintToken();
   const id = randomUUID();
   const expiresAt = new Date(Date.now() + input.expires_in_days * 86400000);
-  await db.query(
-    `INSERT INTO dd_connections(id,name,kind,token_hash,token_prefix,scopes,spaces,expires_at)
+  await db.transaction(async (tx) => {
+    await reserveIdentityName(tx, input.name);
+    await tx.query(
+      `INSERT INTO dd_connections(id,name,kind,token_hash,token_prefix,scopes,spaces,expires_at)
     VALUES($1,$2,'token',$3,$4,$5,$6,$7)`,
-    [id, input.name, tokenHash, prefix, input.scopes, input.spaces, expiresAt],
-  );
+      [
+        id,
+        input.name,
+        tokenHash,
+        prefix,
+        input.scopes,
+        input.spaces,
+        expiresAt,
+      ],
+    );
+  });
   await store.activity(principal.name, "connected", id, input.name);
   return { id, name: input.name, token, expires_at: expiresAt.toISOString() };
 }

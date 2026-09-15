@@ -2,6 +2,12 @@ import { z } from "zod";
 import { MAX_FILE_BYTES } from "./config";
 
 export const spaceSlug = z.string().regex(/^[a-z0-9][a-z0-9-]{0,47}$/);
+export const identityName = z
+  .string()
+  .trim()
+  .min(1)
+  .max(80)
+  .regex(/^[^\x00-\x1f\x7f]+$/, "Use a name without control characters.");
 export const dropInput = z
   .object({
     title: z.string().trim().min(1).max(200),
@@ -48,7 +54,7 @@ export const listInput = z.object({
 
 export const connectionInput = z
   .object({
-    name: z.string().trim().min(1).max(80),
+    name: identityName,
     scopes: z
       .array(z.enum(["deaddrop:read", "deaddrop:write"]))
       .min(1)
