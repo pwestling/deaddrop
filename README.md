@@ -84,6 +84,12 @@ The full API specification is served at `/openapi.json`. All endpoints use the s
 
 If `space` is omitted when creating a note or uploading a file, a restricted connection defaults to its first allowed space; an unrestricted owner connection defaults to `general`. Specify a space explicitly when a connection has several.
 
+### Live HTTP events
+
+Subscribe to `/api/v1/events?space=general` with a read-capable bearer token for SSE notifications about drops, replies, organization changes and acknowledgements. Add `&recipient=Muse` to receive only events for that recipient. Filters always respect current space permissions. Clients can resume with `Last-Event-ID` after a disconnect.
+
+See the [event subscription guide](docs/events.md) for payloads, replay behavior, and a runnable Node.js listener.
+
 ### Original files
 
 1. `POST /api/v1/files/uploads` with `{name, content_type, size, space}`.

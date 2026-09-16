@@ -37,7 +37,10 @@ export async function sessionPrincipal(
   return session ? userPrincipal(db, session.user.id) : null;
 }
 
-export async function apiPrincipal(request: Request): Promise<Principal> {
+export async function apiPrincipal(
+  request: Request,
+  options: { touch?: boolean } = {},
+): Promise<Principal> {
   const authorization = request.headers.get("authorization");
   if (authorization) {
     const match = /^Bearer (dd_[A-Za-z0-9_-]{43})$/.exec(authorization);
@@ -54,8 +57,11 @@ export async function apiPrincipal(request: Request): Promise<Principal> {
       spaces: string[] | null;
       created_by_user_id: string | null;
     }>(
-      `UPDATE dd_connections SET last_used_at = now() WHERE token_hash=$1 AND revoked_at IS NULL
-       AND (expires_at IS NULL OR expires_at > now()) RETURNING id,name,scopes,spaces,created_by_user_id`,
+      options.touch === false
+        ? `SELECT id,name,scopes,spaces,created_by_user_id FROM dd_connections WHERE token_hash=$1 AND revoked_at IS NULL
+           AND (expires_at IS NULL OR expires_at > now())`
+        : `UPDATE dd_connections SET last_used_at = now() WHERE token_hash=$1 AND revoked_at IS NULL
+           AND (expires_at IS NULL OR expires_at > now()) RETURNING id,name,scopes,spaces,created_by_user_id`,
       [hash(match[1])],
     );
     const connection = result.rows[0];

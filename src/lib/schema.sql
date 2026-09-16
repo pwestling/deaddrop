@@ -59,6 +59,19 @@ CREATE TABLE IF NOT EXISTS dd_activity (
   action text NOT NULL, target_id text, detail text, created_at timestamptz NOT NULL DEFAULT now()
 );
 
+-- Durable HTTP notifications. Writers serialize ID allocation until commit so a
+-- reconnect cursor can never skip a lower ID from a still-open transaction.
+CREATE TABLE IF NOT EXISTS dd_events (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  type text NOT NULL CHECK(type IN ('drop.created','drop.updated','drop.acknowledged')),
+  space text NOT NULL REFERENCES dd_spaces(slug), recipient text,
+  drop_id uuid NOT NULL REFERENCES dd_drops(id) ON DELETE CASCADE,
+  actor_id text NOT NULL, actor text NOT NULL, data jsonb NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT clock_timestamp()
+);
+CREATE INDEX IF NOT EXISTS dd_events_space_order ON dd_events(space,id);
+CREATE INDEX IF NOT EXISTS dd_events_recipient_order ON dd_events(recipient,id);
+
 CREATE TABLE IF NOT EXISTS dd_rate_limits (
   key text PRIMARY KEY, count integer NOT NULL, expires_at timestamptz NOT NULL
 );

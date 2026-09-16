@@ -4,6 +4,7 @@ import { db, type Database, type Queryable } from "./db";
 import { AppError } from "./errors";
 import { hash, requireScope, requireSpace, type Principal } from "./policy";
 import { dropInput, listInput } from "./validation";
+import { publishDropEvent } from "./events";
 
 export interface Drop {
   id: string;
@@ -259,16 +260,26 @@ export class DropStore {
         input.title,
         tx,
       );
+      await publishDropEvent(tx, "drop.created", principal, result.rows[0], {
+        title: input.title,
+        parent_id: input.parent_id || null,
+        thread_id: threadId,
+        attachment_ids: input.attachment_ids,
+      });
       return { drop: result.rows[0], replayed: false };
     });
   }
 
   async acknowledge(principal: Principal, id: string) {
-    await this.get(principal, id);
-    await this.database.query(
-      "INSERT INTO dd_receipts(drop_id,principal_id) VALUES($1,$2) ON CONFLICT DO NOTHING",
-      [id, principal.id],
-    );
+    await this.database.transaction(async (tx) => {
+      const drop = await this.get(principal, id, tx);
+      const result = await tx.query(
+        "INSERT INTO dd_receipts(drop_id,principal_id) VALUES($1,$2) ON CONFLICT DO NOTHING RETURNING drop_id",
+        [id, principal.id],
+      );
+      if (result.rows.length)
+        await publishDropEvent(tx, "drop.acknowledged", principal, drop, {});
+    });
     return { acknowledged: true, id };
   }
 
@@ -286,15 +297,21 @@ export class DropStore {
       })
       .strict()
       .parse(raw);
-    await this.get(principal, id);
-    const result = await this.database.query<Drop>(
-      `UPDATE dd_drops SET pinned=COALESCE($2,pinned),
+    return this.database.transaction(async (tx) => {
+      await this.get(principal, id, tx);
+      const result = await tx.query<Drop>(
+        `UPDATE dd_drops SET pinned=COALESCE($2,pinned),
        archived_at=CASE WHEN $3::boolean IS NULL THEN archived_at WHEN $3 THEN now() ELSE NULL END
        WHERE id=$1 RETURNING *`,
-      [id, change.pinned ?? null, change.archived ?? null],
-    );
-    await this.activity(principal.name, "organized", id);
-    return { drop: result.rows[0] };
+        [id, change.pinned ?? null, change.archived ?? null],
+      );
+      await this.activity(principal.name, "organized", id, null, tx);
+      await publishDropEvent(tx, "drop.updated", principal, result.rows[0], {
+        pinned: result.rows[0].pinned,
+        archived_at: result.rows[0].archived_at,
+      });
+      return { drop: result.rows[0] };
+    });
   }
 
   async file(principal: Principal, id: string) {

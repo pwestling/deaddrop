@@ -137,6 +137,8 @@ The invited member can manage their own connections, but only within the space a
 
 ## Development, upgrades, and backups
 
+The [HTTP event stream](events.md) uses the same Postgres database and requires no additional service or environment variables. Run the schema migration before deploying an upgrade that adds event support. The SSE route has a 60-second function budget and rotates streams after 50 seconds; consumers must reconnect using their saved event cursor. Include `dd_events` in database backups. Active subscribers poll the database and keep it active, so account for that usage when running persistent listeners.
+
 For local development, use `.env.local` with `APP_URL=http://localhost:3000`, a separate database, a separate private Blob store, and a development auth secret. Run `npm run db:migrate`, `npm run owner:create` once, then `npm run dev`. The npm scripts for database setup load `.env.local`; the explicit Node commands above load `.env.bootstrap`. Neither is interchangeable by filename alone.
 
 A preview that needs working OAuth must have a stable preview origin, matching `APP_URL`, and isolated data/storage. A protected preview cannot be used by external clients unless those clients can pass its deployment protection. Use a fresh test database where possible. If you clone production, it contains owner accounts, credentials, and encrypted OAuth signing keys; it is not an empty install. A different `BETTER_AUTH_SECRET` cannot decrypt copied keys. Keep such clones private, and reset test-only auth data deliberately or create a fresh database instead.

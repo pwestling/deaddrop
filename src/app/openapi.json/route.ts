@@ -52,6 +52,46 @@ export function GET() {
         },
       },
       paths: {
+        "/events": {
+          get: {
+            operationId: "subscribeEvents",
+            summary: "Subscribe to space or recipient events using SSE",
+            description:
+              "Requires deaddrop:read. Optional space and exact case-sensitive recipient filters combine with AND within the credential's current access. Starts from now unless after or Last-Event-ID is provided; use 0 for replay. Last-Event-ID takes precedence. Sends drop.created (including replies and attachments), drop.updated, and drop.acknowledged metadata. Save ready/checkpoint IDs too. Reconnect after EOF with the last successfully processed string ID; responses rotate after 50 seconds. Heartbeats are comments. stream_error contains code and retryable. No note bodies or private upload events. See the repository's docs/events.md for the protocol and listener example.",
+            parameters: [
+              {
+                name: "space",
+                in: "query",
+                schema: { type: "string" },
+                description: "Space slug; omit for all accessible spaces.",
+              },
+              {
+                name: "recipient",
+                in: "query",
+                schema: { type: "string", maxLength: 100 },
+                description:
+                  "Exact recipient label, e.g. Muse or Claude Work. Does not include broadcasts.",
+              },
+              ...["after", "Last-Event-ID"].map((name) => ({
+                name,
+                in: name === "after" ? "query" : "header",
+                schema: { type: "string", pattern: "^(0|[1-9][0-9]{0,18})$" },
+                description:
+                  "Last processed event ID as a decimal string, at most 9223372036854775807. IDs must not be ahead of this instance's log.",
+              })),
+            ],
+            responses: {
+              ...response,
+              "200": {
+                description:
+                  "SSE stream; process id, event and JSON data fields, persist the cursor and reconnect.",
+                content: {
+                  "text/event-stream": { schema: { type: "string" } },
+                },
+              },
+            },
+          },
+        },
         "/me": {
           get: {
             operationId: "getIdentity",
