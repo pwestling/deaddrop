@@ -1,0 +1,30 @@
+[Unit]
+Description=Deaddrop private inbox
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=deaddrop
+Group=deaddrop
+WorkingDirectory=/app/deaddrop/current
+EnvironmentFile=/app/deaddrop/shared/app.env
+Environment=NODE_ENV=production
+Environment=HOSTNAME=127.0.0.1
+Environment=PORT=__PORT__
+Environment=NEXT_TELEMETRY_DISABLED=1
+ExecStart=__NODE__ /app/deaddrop/current/server.js
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=65
+KillSignal=SIGTERM
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/app/deaddrop/current/.next/cache
+MemoryMax=768M
+
+[Install]
+WantedBy=multi-user.target

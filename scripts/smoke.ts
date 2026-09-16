@@ -4,7 +4,7 @@ import {
   Client,
   StreamableHTTPClientTransport,
 } from "@modelcontextprotocol/client";
-import { del } from "@vercel/blob";
+import { deleteFile } from "../src/lib/storage";
 import { pool } from "../src/lib/db";
 import { mintToken } from "../src/lib/policy";
 
@@ -87,6 +87,41 @@ async function main() {
   console.log(
     "PASS: HTTP authentication, spaces, read-only access, concurrent retries, receipts",
   );
+
+  const streamAbort = new AbortController();
+  const streamTimeout = setTimeout(() => streamAbort.abort(), 15_000);
+  try {
+    const stream = await fetch(`${base}/api/v1/events?space=${space}&after=0`, {
+      headers: { Authorization: `Bearer ${tokens[1].token}` },
+      signal: streamAbort.signal,
+    });
+    assert.equal(stream.status, 200);
+    assert.match(
+      stream.headers.get("content-type") || "",
+      /text\/event-stream/,
+    );
+    const reader = stream.body!.getReader();
+    const decoder = new TextDecoder();
+    let received = "";
+    while (!received.includes("event: drop.created")) {
+      const chunk = await reader.read();
+      assert.equal(
+        chunk.done,
+        false,
+        "Stream ended before replaying its event",
+      );
+      received += decoder.decode(chunk.value, { stream: true });
+    }
+    assert.ok(received.includes("event: ready"));
+    assert.ok(received.includes(id));
+    await reader.cancel();
+    console.log(
+      "PASS: authenticated SSE, immediate unbuffered frames and event replay",
+    );
+  } finally {
+    clearTimeout(streamTimeout);
+    streamAbort.abort();
+  }
 
   const bytes = Buffer.from("Original file bytes.\n", "utf8");
   const upload = await api(
@@ -194,7 +229,7 @@ main()
       "SELECT pathname FROM dd_files WHERE space=$1",
       [space],
     );
-    for (const file of files.rows) await del(file.pathname).catch(() => {});
+    for (const file of files.rows) await deleteFile(file.pathname);
     await pool.query(
       "DELETE FROM dd_receipts WHERE drop_id IN (SELECT id FROM dd_drops WHERE space=$1)",
       [space],

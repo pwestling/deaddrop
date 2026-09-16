@@ -1,5 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { head, put, issueSignedToken, presignUrl, get } from "@vercel/blob";
+import {
+  signedUpload,
+  headFile,
+  putFile,
+  signedDownload,
+  readFileBytes,
+} from "./storage";
 import { db } from "./db";
 import { AppError } from "./errors";
 import { MAX_INLINE_BYTES } from "./config";
@@ -37,28 +43,19 @@ async function reserve(principal: Principal, raw: unknown) {
 export async function createUpload(principal: Principal, raw: unknown) {
   const file = await reserve(principal, raw);
   const validUntil = Date.now() + 15 * 60 * 1000;
-  const constraints = {
-    pathname: file.pathname,
-    maximumSizeInBytes: file.size,
-    allowedContentTypes: [file.content_type],
+  const upload = await signedUpload(
+    {
+      pathname: file.pathname,
+      size: file.size,
+      contentType: file.content_type,
+    },
     validUntil,
-  };
-  const signed = await issueSignedToken({
-    ...constraints,
-    operations: ["put"],
-  });
-  const { presignedUrl } = await presignUrl(signed, {
-    ...constraints,
-    operation: "put",
-    access: "private",
-    addRandomSuffix: false,
-    allowOverwrite: false,
-  });
+  );
   return {
     file_id: file.id,
-    upload_url: presignedUrl,
+    upload_url: upload.url,
     method: "PUT",
-    headers: { "Content-Type": file.content_type },
+    headers: upload.headers,
     expires_at: new Date(validUntil).toISOString(),
     complete_url: `/api/v1/files/${file.id}/complete`,
   };
@@ -76,7 +73,7 @@ export async function completeUpload(principal: Principal, id: string) {
   if (file.status === "ready") return { file_id: id, status: "ready" };
   let blob;
   try {
-    blob = await head(file.pathname);
+    blob = await headFile(file.pathname);
   } catch {
     throw new AppError(
       409,
@@ -133,12 +130,14 @@ export async function uploadInline(
       "The declared size does not match the file bytes.",
     );
   const file = await reserve(principal, input);
-  await put(file.pathname, bytes, {
-    access: "private",
-    contentType: file.content_type,
-    addRandomSuffix: false,
-    allowOverwrite: false,
-  });
+  await putFile(
+    {
+      pathname: file.pathname,
+      size: file.size,
+      contentType: file.content_type,
+    },
+    bytes,
+  );
   return completeUpload(principal, file.id);
 }
 
@@ -146,22 +145,14 @@ export async function downloadLink(principal: Principal, id: string) {
   const file = await store.file(principal, id);
   if (file.status !== "ready")
     throw new AppError(409, "upload_incomplete", "This upload is not ready.");
-  const signed = await issueSignedToken({
-    pathname: file.pathname,
-    operations: ["get"],
-    validUntil: Date.now() + 5 * 60 * 1000,
-  });
-  const { presignedUrl } = await presignUrl(signed, {
-    pathname: file.pathname,
-    operation: "get",
-    access: "private",
-  });
+  const validUntil = Date.now() + 5 * 60 * 1000;
+  const url = await signedDownload(file.pathname, validUntil);
   return {
-    url: presignedUrl,
+    url,
     name: file.name,
     content_type: file.content_type,
     size: Number(file.size),
-    expires_at: new Date(signed.validUntil).toISOString(),
+    expires_at: new Date(validUntil).toISOString(),
   };
 }
 
@@ -184,10 +175,8 @@ export async function imageContent(principal: Principal, id: string) {
       "image_too_large",
       "Use a download link for images larger than 2 MiB.",
     );
-  const blob = await get(file.pathname, { access: "private" });
-  if (!blob || blob.statusCode !== 200 || !blob.stream)
-    throw new AppError(404, "not_found", "Image unavailable.");
-  const buffer = await new Response(blob.stream).arrayBuffer();
+  const buffer = await readFileBytes(file.pathname);
+  if (!buffer) throw new AppError(404, "not_found", "Image unavailable.");
   return {
     type: "image" as const,
     mimeType: file.content_type,

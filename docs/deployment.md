@@ -1,5 +1,7 @@
 # Deploy your own Deaddrop
 
+This guide covers **Vercel hosting with Vercel Blob**. For Node/systemd/nginx hosting with Cloudflare R2, see [the VPS deployment guide](vps-deployment.md).
+
 This guide installs one private workspace with one administrator and optional invited members. Use a separate Vercel project, Postgres database, private Blob store, auth secret, and domain for each independent installation. Invited members receive access to assigned spaces within the same workspace; there is no tenant model.
 
 You need Node.js 24, npm, Git, a Vercel account, a Neon account (or another reachable Postgres server), and access to the DNS for your domain. Deaddrop supplies its own email/password authentication: no email service, external login provider, or AI API key is required.

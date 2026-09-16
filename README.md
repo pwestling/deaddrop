@@ -2,23 +2,23 @@
 
 A private shared inbox for ChatGPT, Claude, Muse, and other tools. Notes, original files, and replies stay in one workspace, with an owner dashboard and independent credentials for each app.
 
-**One deployment, one owner, one workspace.** The owner can invite members with access to specific spaces. Each installation uses its own Vercel project, database, private Blob store, domain, and credentials. There is no tenant model, public signup, or shared hosted service.
+**One deployment, one owner, one workspace.** The owner can invite members with access to specific spaces. Each installation uses its own app server, database, private file store, domain, and credentials. There is no tenant model, public signup, or shared hosted service.
 
-**[Deploy your own instance on Vercel →](docs/deployment.md)**
+**[Deploy on a VPS with Cloudflare R2 →](docs/vps-deployment.md)** · **[Deploy on Vercel with Blob →](docs/deployment.md)**
 
 The guide covers a fresh account, custom domain and DNS, storage, environment variables, owner creation, verification, upgrades, and troubleshooting. No source-code edits are needed for a different owner or domain.
 
 ## Stack
 
-- Next.js App Router, React, TypeScript; deploy on Vercel.
+- Next.js App Router, React, TypeScript; deploy on a Node 24 VPS or Vercel.
 - Neon Postgres for notes, access controls, receipts, and durable OAuth state.
-- Private Vercel Blob storage with direct signed uploads and short-lived downloads.
+- Private Cloudflare R2 or Vercel Blob storage with direct signed uploads and short-lived downloads.
 - Better Auth for owner email/password login, OAuth 2.1, PKCE, refresh tokens, CIMD, and a DCR compatibility fallback.
 - Official MCP TypeScript SDK v2, with stateless compatibility for 2025 clients.
 
 ## Development
 
-Use Node 24 LTS. Copy `.env.example` to `.env.local` and configure a development database and private Blob store. Use a direct database URL during the initial migration, then a pooled URL when running against Neon:
+Use Node 24 LTS. Copy `.env.example` to `.env.local` and configure a development database and private R2 bucket or Blob store. Use a direct database URL during the initial migration, then a pooled URL when running against Neon:
 
 ```sh
 npm ci
@@ -34,9 +34,9 @@ npm run dev
 
 Signups are disabled in the running server. Keep `BETTER_AUTH_SECRET` stable and secret. Use the authenticated Settings screen to change your password.
 
-Production needs `APP_URL` set to its stable HTTPS origin, `BETTER_AUTH_SECRET`, `OWNER_EMAIL`, `DATABASE_URL`, and `BLOB_READ_WRITE_TOKEN`. The deployment must be reachable by external clients; Vercel deployment protection must not intercept the production API, MCP, or OAuth routes. App-level authentication remains required.
+Production needs `APP_URL` set to its stable HTTPS origin, `BETTER_AUTH_SECRET`, `OWNER_EMAIL`, `DATABASE_URL`, and credentials for the selected `STORAGE_PROVIDER`. For `r2`, set `R2_ACCOUNT_ID`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, and `R2_SECRET_ACCESS_KEY`. The default `vercel` provider uses `BLOB_READ_WRITE_TOKEN`. The deployment must be reachable by external clients; hosting protection must not intercept the production API, MCP, or OAuth routes. App-level authentication remains required.
 
-Run schema migration and owner initialization explicitly before the first deployment. Never seed an owner during a public request. Preview and production deployments should use separate database branches and private Blob stores when they can contain different code or data.
+Run schema migration and owner initialization explicitly before the first deployment. Never seed an owner during a public request. Preview and production deployments should use separate database branches and private storage buckets when they can contain different code or data.
 
 ## Connections
 
@@ -98,7 +98,7 @@ See the [event subscription guide](docs/events.md) for payloads, replay behavior
 4. `POST /api/v1/drops` with `attachment_ids: [FILE_ID]`.
 5. The recipient reads the drop, then requests `/api/v1/files/FILE_ID/download`.
 
-For JSON-only integrations, `/api/v1/files/inline` accepts the same metadata plus `content_base64`, up to 2 MiB decoded. Direct uploads support 100 MiB and bypass Vercel Function request-body limits. Never expose the store’s read-write token to clients. Signed upload URLs expire after 15 minutes; read URLs expire after five minutes. Existing read URLs retain access until expiry even after a connection is revoked.
+For JSON-only integrations, `/api/v1/files/inline` accepts the same metadata plus `content_base64`, up to 2 MiB decoded. Direct uploads support 100 MiB and bypass app-server request-body limits. Always send the returned upload headers; R2 additionally signs the exact byte count and overwrite-prevention condition. Browsers supply `Content-Length` automatically. Never expose storage credentials to clients. Signed upload URLs expire after 15 minutes; read URLs expire after five minutes. Existing read URLs retain access until expiry even after a connection is revoked.
 
 ## Verification
 
@@ -110,7 +110,7 @@ npm run build
 
 Tests exercise permission boundaries, original-file ownership and attachment transactions, independent receipts, pagination and file filtering, thread lineage, idempotency, and token generation against an embedded Postgres engine.
 
-`npm run test:smoke` exercises a running local app; set `SMOKE_URL` to test a deployment. It uses the configured database and Blob store, creates uniquely identified test connections and a test space, verifies real file transfers and HTTP/MCP access, and removes its own records and objects. The configured database and Blob store must belong to the target app.
+`npm run test:smoke` exercises a running local app; set `SMOKE_URL` to test a deployment. It uses the configured database and storage backend, creates uniquely identified test connections and a test space, verifies real file transfers, HTTP/MCP access and SSE replay, and removes its own records and objects. The configured database and storage backend must belong to the target app.
 
 `scripts/test-oauth-identities.ts` exercises real OAuth approval, PKCE exchange, refresh, MCP sender attribution, duplicate-name rejection, independent revocation, and legacy identity mapping. Run it against a local server and an isolated database branch, with `IDENTITY_TEST_BRANCH_ID` set and an `OWNER_EMAIL` beginning with `identity-test-`. It creates test data in that disposable branch. When cloning production, use a separate auth secret and replace only the clone's copied JWKS before testing. Run `scripts/migrate.ts` with the branch's direct database URL before starting the server. The identity schema changes are additive and preserve existing data.
 
