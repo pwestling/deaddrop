@@ -76,9 +76,15 @@ export class EventStore {
   constructor(private database: Queryable) {}
 
   async latest() {
+    // Read the non-transactional sequence only after taking the publication lock.
+    // Without that lock an uncommitted event could be skipped; max(id) instead
+    // regresses when events are deleted (e.g. isolated smoke-test cleanup).
+    // The materialized CTE runs first, and the volatile sequence read runs while
+    // this statement still holds its shared transaction lock. Identity CACHE=1.
     return (
       await this.database.query<{ id: string }>(
-        "SELECT COALESCE(max(id),0)::text AS id FROM dd_events",
+        `WITH locked AS MATERIALIZED (SELECT pg_advisory_xact_lock_shared(1788124201, 1))
+         SELECT COALESCE(pg_sequence_last_value('dd_events_id_seq'::regclass),0)::text AS id FROM locked`,
       )
     ).rows[0].id;
   }

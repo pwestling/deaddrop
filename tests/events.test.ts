@@ -202,6 +202,33 @@ it("validates cursors and prefers Last-Event-ID on reconnect", () => {
   }
 });
 
+it("keeps issued cursors valid after event cleanup and sequence gaps from rolled-back writes", async () => {
+  const first = await drops.create(owner, { title: "Temporary" });
+  const issued = await events.latest();
+  await database.query("DELETE FROM dd_drops WHERE id=$1", [first.drop.id]);
+  expect(await events.latest()).toBe(issued);
+  expect(await events.read(reader, {}, issued)).toEqual({
+    events: [],
+    cursor: issued,
+  });
+  const rollback = new DropStore({
+    ...database,
+    transaction: (fn) =>
+      database.transaction(async (tx) => {
+        await fn(tx);
+        throw new Error("Rollback after allocating an event ID");
+      }),
+  });
+  await expect(
+    rollback.create(owner, { title: "Rolled back" }),
+  ).rejects.toThrow("Rollback");
+  const gap = await events.latest();
+  expect(BigInt(gap)).toBeGreaterThan(BigInt(issued));
+  const next = await drops.create(owner, { title: "Next committed message" });
+  const batch = await events.read(reader, {}, gap);
+  expect(batch.events.map((event) => event.drop_id)).toEqual([next.drop.id]);
+});
+
 it("starts live by default and emits heartbeats and a graceful reconnect", async () => {
   await drops.create(owner, { title: "Before subscription" });
   const response = await eventResponse(
