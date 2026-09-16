@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
 import {
   Client,
   StreamableHTTPClientTransport,
@@ -10,7 +11,7 @@ import { mintToken } from "../src/lib/policy";
 
 const base = process.env.SMOKE_URL || "http://localhost:3000";
 const space = `smoke-${randomUUID().slice(0, 8)}`;
-const principals = [randomUUID(), randomUUID(), randomUUID()];
+const principals = [randomUUID(), randomUUID(), randomUUID(), randomUUID()];
 const tokens = principals.map(() => mintToken());
 const client = new Client({ name: "Deaddrop smoke check", version: "1.0.0" });
 
@@ -196,7 +197,7 @@ async function main() {
     }),
   );
   const tools = await client.listTools();
-  assert.equal(tools.tools.length, 10);
+  assert.equal(tools.tools.length, 15);
   const found = await client.callTool({
     name: "list_drops",
     arguments: { space },
@@ -215,11 +216,213 @@ async function main() {
   console.log(
     "PASS: MCP handshake, tool discovery, shared HTTP/MCP notes, native image content",
   );
+  async function tool(name: string, args: Record<string, unknown> = {}) {
+    const result = await client.callTool({ name, arguments: args });
+    assert.notEqual(result.isError, true, JSON.stringify(result.content));
+    const text = result.content.find((item) => item.type === "text");
+    assert.ok(text && text.type === "text");
+    return JSON.parse(text.text);
+  }
+  assert.equal((await tool("get_identity")).identity.id, principals[0]);
+  const conversation = await tool("leave_drop", {
+    title: "Chat smoke",
+    body: "Question",
+    space,
+    recipient: "Smoke 3",
+    idempotency_key: "chat-root",
+  });
+  const fast = await api(
+    `drops/${conversation.drop.id}/replies`,
+    3,
+    "POST",
+    { body: "Fast response" },
+    201,
+    { "Idempotency-Key": "fast-answer" },
+  );
+  assert.equal(fast.drop.recipient, "Smoke 0");
+  const caught = await tool("wait_for_reply", {
+    drop_id: conversation.drop.id,
+    timeout_seconds: 0,
+  });
+  assert.deepEqual(
+    caught.messages.map((m: { id: string }) => m.id),
+    [fast.drop.id],
+  );
+  assert.equal(
+    (
+      await tool("wait_for_reply", {
+        drop_id: conversation.drop.id,
+        after: caught.cursor,
+        timeout_seconds: 0,
+      })
+    ).status,
+    "timeout",
+  );
+  const pending = tool("wait_for_reply", {
+    drop_id: conversation.drop.id,
+    after: caught.cursor,
+    timeout_seconds: 10,
+  });
+  const later = (async () => {
+    await delay(300);
+    const path = `drops/${fast.drop.id}/replies`;
+    const answer = await api(
+      path,
+      3,
+      "POST",
+      { body: "Live followup", recipient: "Smoke 0" },
+      201,
+      { "Idempotency-Key": "live-answer" },
+    );
+    assert.equal(
+      (
+        await api(
+          path,
+          3,
+          "POST",
+          { body: "Live followup", recipient: "Smoke 0" },
+          201,
+          { "Idempotency-Key": "live-answer" },
+        )
+      ).drop.id,
+      answer.drop.id,
+    );
+    return answer;
+  })();
+  const [received, sent] = await Promise.all([pending, later]);
+  assert.deepEqual(
+    received.messages.map((m: { id: string }) => m.id),
+    [sent.drop.id],
+  );
+  const page = await tool("read_thread", { drop_id: sent.drop.id, limit: 2 });
+  assert.equal(page.messages.length, 2);
+  assert.equal(
+    (
+      await tool("read_thread", {
+        drop_id: conversation.drop.id,
+        page: page.next_page,
+      })
+    ).messages[0].id,
+    sent.drop.id,
+  );
+  const reply = await tool("reply_to_drop", {
+    drop_id: sent.drop.id,
+    body: "Received",
+    idempotency_key: "chat-confirmation",
+  });
+  assert.equal(reply.drop.recipient, "Smoke 3");
+  assert.equal(
+    (
+      await api(`drops/${conversation.drop.id}/wait`, 3, "POST", {
+        after: sent.cursor,
+        timeout_seconds: 0,
+      })
+    ).messages[0].id,
+    reply.drop.id,
+  );
+  assert.equal(
+    (
+      await api("messages/wait", 0, "POST", {
+        space,
+        recipient: "Smoke 0",
+        after: conversation.cursor,
+        timeout_seconds: 0,
+      })
+    ).messages.length,
+    2,
+  );
+  assert.equal(
+    (await api(`drops/${conversation.drop.id}/thread`, 1)).messages.length,
+    4,
+  );
+  await api(
+    `drops/${conversation.drop.id}/wait`,
+    2,
+    "POST",
+    { timeout_seconds: 0 },
+    404,
+  );
+  await api(
+    `drops/${conversation.drop.id}/replies`,
+    1,
+    "POST",
+    { body: "Denied" },
+    403,
+  );
+  console.log(
+    "PASS: MCP/HTTP live chat, fast replies, retry-safe sends, cursor resume, thread pagination and space isolation",
+  );
+  // Exercise the stateless 2025 transport used by older MCP clients as well.
+  for (const protocolVersion of ["2025-03-26", "2025-11-25"]) {
+    async function legacy(method: string, params: Record<string, unknown>) {
+      const response = await fetch(`${base}/mcp`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${tokens[0].token}`,
+          "Content-Type": "application/json",
+          Accept: "application/json, text/event-stream",
+          "MCP-Protocol-Version": protocolVersion,
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: randomUUID(),
+          method,
+          params,
+        }),
+      });
+      assert.equal(response.status, 200);
+      const text = await response.text();
+      const envelope = response.headers
+        .get("content-type")
+        ?.includes("text/event-stream")
+        ? text
+            .split("\n")
+            .filter((line) => line.startsWith("data: "))
+            .map((line) => JSON.parse(line.slice(6)))
+            .find((message) => "result" in message || "error" in message)
+        : JSON.parse(text);
+      assert.ok(envelope && !envelope.error, text);
+      return envelope.result;
+    }
+    assert.equal(
+      (
+        await legacy("initialize", {
+          protocolVersion,
+          capabilities: {},
+          clientInfo: { name: "Legacy chat smoke", version: "1.0.0" },
+        })
+      ).protocolVersion,
+      protocolVersion,
+    );
+    const waiting = await legacy("tools/call", {
+      name: "wait_for_reply",
+      arguments: {
+        drop_id: conversation.drop.id,
+        after: reply.cursor,
+        timeout_seconds: 0,
+      },
+    });
+    assert.notEqual(waiting.isError, true);
+    assert.equal(JSON.parse(waiting.content[0].text).status, "timeout");
+  }
+  console.log("PASS: chat tools over both supported 2025 MCP transports");
+  const revokedWait = client.callTool({
+    name: "wait_for_reply",
+    arguments: {
+      drop_id: conversation.drop.id,
+      after: reply.cursor,
+      timeout_seconds: 10,
+    },
+  });
+  await delay(300);
   await pool.query("UPDATE dd_connections SET revoked_at=now() WHERE id=$1", [
     principals[0],
   ]);
+  const revokedResult = await revokedWait;
+  assert.equal(revokedResult.isError, true);
+  assert.ok(JSON.stringify(revokedResult.content).includes("invalid_token"));
   await api("me", 0, "GET", undefined, 401);
-  console.log("PASS: token revocation");
+  console.log("PASS: token revocation during an active MCP wait");
 }
 
 main()

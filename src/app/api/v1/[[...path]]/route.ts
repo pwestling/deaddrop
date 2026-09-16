@@ -19,6 +19,7 @@ import {
 import { fileInput } from "@/lib/validation";
 import { MemberStore } from "@/lib/members";
 import { db } from "@/lib/db";
+import { chat } from "@/lib/chat";
 
 const members = new MemberStore(db);
 
@@ -40,7 +41,56 @@ async function handle(
     let result: unknown;
     let status = 200;
     if (route === "me" && method === "GET") result = { identity: principal };
-    else if (route === "drops" && method === "GET") {
+    else if (route === "messages/wait" && method === "POST") {
+      result = await chat.waitMessages(principal, await jsonBody(request), {
+        authenticate: () => apiPrincipal(request, { touch: false }),
+        signal: request.signal,
+      });
+    } else if (
+      path[0] === "drops" &&
+      path.length === 3 &&
+      path[2] === "wait" &&
+      method === "POST"
+    ) {
+      const input = z
+        .record(z.string(), z.unknown())
+        .parse(await jsonBody(request));
+      result = await chat.waitReply(
+        principal,
+        { ...input, drop_id: path[1] },
+        {
+          authenticate: () => apiPrincipal(request, { touch: false }),
+          signal: request.signal,
+        },
+      );
+    } else if (
+      path[0] === "drops" &&
+      path.length === 3 &&
+      path[2] === "replies" &&
+      method === "POST"
+    ) {
+      const input = z
+        .record(z.string(), z.unknown())
+        .parse(await jsonBody(request));
+      result = await chat.reply(principal, {
+        ...input,
+        drop_id: path[1],
+        idempotency_key:
+          request.headers.get("idempotency-key") || input.idempotency_key,
+      });
+      status = 201;
+    } else if (
+      path[0] === "drops" &&
+      path.length === 3 &&
+      path[2] === "thread" &&
+      method === "GET"
+    ) {
+      result = await chat.thread(principal, {
+        drop_id: path[1],
+        page: url.searchParams.get("page") ?? undefined,
+        limit: Number(url.searchParams.get("limit") ?? 20),
+      });
+    } else if (route === "drops" && method === "GET") {
       result = await store.list(principal, {
         space: url.searchParams.get("space") || undefined,
         q: url.searchParams.get("q") || undefined,

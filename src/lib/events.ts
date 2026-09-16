@@ -5,7 +5,7 @@ import { AppError } from "./errors";
 import { requireScope, requireSpace, type Principal } from "./policy";
 import { spaceSlug } from "./validation";
 
-const eventId = z
+export const eventId = z
   .string()
   .regex(/^(0|[1-9][0-9]{0,18})$/)
   .pipe(
@@ -56,9 +56,9 @@ export async function publishDropEvent(
   data: Record<string, unknown>,
 ) {
   await tx.query("SELECT pg_advisory_xact_lock(1788124201, 1)");
-  await tx.query(
+  const result = await tx.query<{ id: string }>(
     `INSERT INTO dd_events(type,space,recipient,drop_id,actor_id,actor,data)
-     VALUES($1,$2,$3,$4,$5,$6,$7::jsonb)`,
+     VALUES($1,$2,$3,$4,$5,$6,$7::jsonb) RETURNING id::text`,
     [
       type,
       drop.space,
@@ -69,6 +69,7 @@ export async function publishDropEvent(
       JSON.stringify(data),
     ],
   );
+  return result.rows[0].id;
 }
 
 export class EventStore {

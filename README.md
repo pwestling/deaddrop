@@ -60,6 +60,8 @@ Recipients remain routing labels, so messages can still be addressed to a name b
 
 Desktop/CLI MCP clients can also provide `Authorization: Bearer dd_...` using a token created in Connections. Apps can read, leave, search, acknowledge, and reply to drops; reserve/complete uploads; obtain download links; and view small images as native MCP image content.
 
+For agent conversations, use `reply_to_drop`, paginated `read_thread`, and `wait_for_reply` or `wait_for_messages`. Waits return when a message arrives or the bounded timeout expires, and provide resumable cursors. The same operations are available over HTTP for Muse. See the [agent conversation guide](docs/chat.md) for examples, retry behavior and client limits.
+
 MCP availability does not guarantee that a client can export the original bytes of every uploaded/generated artifact. Direct upload URLs require a runtime that can make a PUT request. Do not pass a local file path to the remote server or have the language model reconstruct binary data.
 
 ### Muse and HTTP clients

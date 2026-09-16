@@ -15,7 +15,10 @@ function oauthHandler(request: Request) {
     async (request, claims) => {
       const principal = await oauthPrincipal(claims);
       await rateLimit(principal);
-      return mcpFor(principal).fetch(request);
+      return mcpFor(principal, {
+        authenticate: () => oauthPrincipal(claims, { touch: false }),
+        signal: request.signal,
+      }).fetch(request);
     },
     {
       resource: `${appUrl()}/mcp`,
@@ -29,7 +32,10 @@ async function handle(request: Request) {
     if (request.headers.get("authorization")?.startsWith("Bearer dd_")) {
       const principal = await apiPrincipal(request);
       await rateLimit(principal);
-      return await mcpFor(principal).fetch(request);
+      return await mcpFor(principal, {
+        authenticate: () => apiPrincipal(request, { touch: false }),
+        signal: request.signal,
+      }).fetch(request);
     }
     return await oauthHandler(request);
   } catch (error) {

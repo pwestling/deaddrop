@@ -195,7 +195,15 @@ export class DropStore {
               "idempotency_conflict",
               "This key was already used for a different drop.",
             );
-          return { drop: existing.rows[0], replayed: true };
+          const event = await tx.query<{ id: string }>(
+            "SELECT id::text FROM dd_events WHERE drop_id=$1 AND type='drop.created' ORDER BY id LIMIT 1",
+            [existing.rows[0].id],
+          );
+          return {
+            drop: existing.rows[0],
+            replayed: true,
+            cursor: event.rows[0]?.id ?? null,
+          };
         }
       }
       const spaces = await tx.query(
@@ -260,13 +268,19 @@ export class DropStore {
         input.title,
         tx,
       );
-      await publishDropEvent(tx, "drop.created", principal, result.rows[0], {
-        title: input.title,
-        parent_id: input.parent_id || null,
-        thread_id: threadId,
-        attachment_ids: input.attachment_ids,
-      });
-      return { drop: result.rows[0], replayed: false };
+      const cursor = await publishDropEvent(
+        tx,
+        "drop.created",
+        principal,
+        result.rows[0],
+        {
+          title: input.title,
+          parent_id: input.parent_id || null,
+          thread_id: threadId,
+          attachment_ids: input.attachment_ids,
+        },
+      );
+      return { drop: result.rows[0], replayed: false, cursor };
     });
   }
 

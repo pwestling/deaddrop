@@ -85,7 +85,16 @@ export async function apiPrincipal(
   return principal;
 }
 
-export async function oauthPrincipal(claims: JWTPayload): Promise<Principal> {
+export async function oauthPrincipal(
+  claims: JWTPayload,
+  options: { touch?: boolean } = {},
+): Promise<Principal> {
+  if (typeof claims.exp === "number" && claims.exp * 1000 <= Date.now())
+    throw new AppError(
+      401,
+      "invalid_token",
+      "This OAuth access token has expired.",
+    );
   const clientId =
     typeof claims.client_id === "string"
       ? claims.client_id
@@ -120,7 +129,10 @@ export async function oauthPrincipal(claims: JWTPayload): Promise<Principal> {
       spaces: string[] | null;
       scopes: string[];
     }>(
-      `UPDATE dd_connections SET last_used_at=now() WHERE id=$1 AND oauth_user_id=$2
+      options.touch === false
+        ? `SELECT id,name,spaces,scopes FROM dd_connections WHERE id=$1 AND oauth_user_id=$2
+       AND oauth_authorization_client_id=$3 AND kind='oauth' AND revoked_at IS NULL`
+        : `UPDATE dd_connections SET last_used_at=now() WHERE id=$1 AND oauth_user_id=$2
        AND oauth_authorization_client_id=$3 AND kind='oauth' AND revoked_at IS NULL
        RETURNING id,name,spaces,scopes`,
       [identityId.data, claims.sub, clientId],
@@ -164,16 +176,20 @@ export async function oauthPrincipal(claims: JWTPayload): Promise<Principal> {
     spaces: string[] | null;
     revoked_at: Date | null;
   }>(
-    `INSERT INTO dd_connections (id,name,kind,oauth_client_id,scopes) VALUES ($1,$2,'oauth',$3,$4)
+    options.touch === false
+      ? `SELECT id,name,spaces,revoked_at FROM dd_connections WHERE oauth_client_id=$1`
+      : `INSERT INTO dd_connections (id,name,kind,oauth_client_id,scopes) VALUES ($1,$2,'oauth',$3,$4)
      ON CONFLICT (oauth_client_id) DO UPDATE SET last_used_at=now() RETURNING id,name,spaces,revoked_at`,
-    [
-      randomUUID(),
-      client.rows[0]?.name || "MCP application",
-      clientId,
-      [...SCOPES],
-    ],
+    options.touch === false
+      ? [clientId]
+      : [
+          randomUUID(),
+          client.rows[0]?.name || "MCP application",
+          clientId,
+          [...SCOPES],
+        ],
   );
-  if (connection.rows[0].revoked_at)
+  if (!connection.rows[0] || connection.rows[0].revoked_at)
     throw new AppError(
       403,
       "connection_revoked",

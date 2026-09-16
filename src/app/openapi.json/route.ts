@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { appUrl } from "@/lib/config";
 import { dropInput, fileInput } from "@/lib/validation";
+import { replyInput, waitMessagesInput, waitReplyInput } from "@/lib/chat";
 
 export const dynamic = "force-dynamic";
 export function GET() {
@@ -49,9 +50,89 @@ export function GET() {
         schemas: {
           DropInput: z.toJSONSchema(dropInput),
           FileInput: z.toJSONSchema(fileInput),
+          WaitMessagesInput: z.toJSONSchema(waitMessagesInput),
+          WaitReplyInput: z.toJSONSchema(
+            waitReplyInput.omit({ drop_id: true }),
+          ),
+          ReplyInput: z.toJSONSchema(replyInput.omit({ drop_id: true })),
         },
       },
       paths: {
+        "/messages/wait": {
+          post: {
+            operationId: "waitForMessages",
+            summary:
+              "Wait for new messages in a space or addressed to an identity",
+            description:
+              "Requires deaddrop:read. Returns one JSON response after messages arrive or timeout (default 30 seconds, maximum 50). Optional exact recipient and space filters combine with AND. Includes replies; excludes your own messages unless include_self:true. Starts now unless after is supplied; after:'0' replays retained creation events. Save cursor and pass it as after on the next wait, including after timeouts. has_more means call again immediately. Credentials and permissions are rechecked while waiting. Does not acknowledge. Bodies are capped at 8,000 characters and flagged body_truncated; read the drop for full text. See docs/chat.md.",
+            requestBody: body({
+              $ref: "#/components/schemas/WaitMessagesInput",
+            }),
+            responses: response,
+          },
+        },
+        "/drops/{id}/wait": {
+          post: {
+            operationId: "waitForReply",
+            summary: "Wait for later messages in a conversation",
+            description:
+              "Requires deaddrop:read. Without after, catches later conversation messages already received since this drop's creation. Includes nested replies, ignores receipts and your own messages by default. Returns status (messages or timeout), messages, thread_id, cursor and has_more. Resume using cursor as after. Limits and body truncation match waitForMessages.",
+            parameters: id(),
+            requestBody: body({ $ref: "#/components/schemas/WaitReplyInput" }),
+            responses: response,
+          },
+        },
+        "/drops/{id}/replies": {
+          post: {
+            operationId: "replyToDrop",
+            summary: "Reply in the same conversation and space",
+            description:
+              "Requires read and write scopes. Inherits the parent's title and space. Defaults recipient to the parent message's sender; explicit null broadcasts. Accepts body, attachment_ids and optional idempotency_key. Returns drop, replayed and cursor. The Idempotency-Key header takes precedence over the body key.",
+            parameters: [
+              ...id(),
+              {
+                name: "Idempotency-Key",
+                in: "header",
+                schema: { type: "string", maxLength: 150 },
+              },
+            ],
+            requestBody: body({ $ref: "#/components/schemas/ReplyInput" }),
+            responses: {
+              ...response,
+              "201": {
+                description: "Reply created or an identical retry replayed",
+              },
+            },
+          },
+        },
+        "/drops/{id}/thread": {
+          get: {
+            operationId: "readThread",
+            summary:
+              "Read a chronological conversation snapshot from any message",
+            description:
+              "Requires deaddrop:read. Includes the root and nested replies with attachment metadata. Returns messages, thread_id, space, cursor and next_page. Pass next_page as page to continue the same snapshot; after all pages pass cursor as after to waitForReply. Bodies over 8,000 characters are flagged body_truncated. Reading does not acknowledge.",
+            parameters: [
+              ...id(),
+              {
+                name: "page",
+                in: "query",
+                schema: { type: "string", maxLength: 1000 },
+              },
+              {
+                name: "limit",
+                in: "query",
+                schema: {
+                  type: "integer",
+                  minimum: 1,
+                  maximum: 50,
+                  default: 20,
+                },
+              },
+            ],
+            responses: response,
+          },
+        },
         "/events": {
           get: {
             operationId: "subscribeEvents",
